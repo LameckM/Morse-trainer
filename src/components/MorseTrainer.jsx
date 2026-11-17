@@ -311,12 +311,15 @@ export default function MorseTrainer() {
   }
 
   const clearProgress = () => {
-    const ok = window.confirm("Clear all lesson progress? This can't be undone.")
+    const ok = window.confirm("Reset all lesson and practice progress? This can't be undone.")
     if (!ok) return
     localStorage.removeItem(PROGRESS_KEY)
+    localStorage.removeItem(PRACTICE_LETTER_PROGRESS_KEY)
     setCompleted([])
+    setCompletedPracticeLetterSections([])
     setLessonId(LESSONS[0].id)
-    resetRound(LESSONS[0].chars)
+    setPracticeLetterSectionId(1)
+    resetRound(mode === 'practice' ? LESSONS[0].chars : LESSONS[0].chars)
     setStreak(0)
   }
 
@@ -578,6 +581,12 @@ export default function MorseTrainer() {
             <p className="text-xs text-neutral-500 mt-4">
               Score at least 90% in a letter section to unlock the next one. Numbers, symbols, and punctuation remain available independently.
             </p>
+            <button
+              onClick={clearProgress}
+              className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors mt-4"
+            >
+              <Trash2 size={13} /> Reset progress
+            </button>
           </div>
         ) : mode === 'test' ? (
           <div>
