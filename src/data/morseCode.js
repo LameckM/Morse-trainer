@@ -30,6 +30,7 @@ const charsOf = (ids) => LESSONS.filter((l) => ids.includes(l.id)).flatMap((l) =
 export const REFERENCE_GROUPS = [
   { label: 'Letters', chars: charsOf([1, 2, 3, 4]).sort() },
   { label: 'Numbers', chars: charsOf([5]) },
-  { label: 'Punctuation', chars: charsOf([6]) },
-  { label: 'Symbols', chars: charsOf([7]) },
+  { label: 'Punctuation', chars: ['.', ',', '?', "'", '!', '-', '/', '(', ')', ':', ';', '&'] },
+  { label: 'Symbols', chars: ['=', '+', '_', '"', '
+, '@'] },
 ]
