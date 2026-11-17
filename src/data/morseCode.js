@@ -31,5 +31,5 @@ export const REFERENCE_GROUPS = [
   { label: 'Letters', chars: charsOf([1, 2, 3, 4]).sort() },
   { label: 'Numbers', chars: charsOf([5]) },
   { label: 'Punctuation', chars: charsOf([6]) },
-  { label: 'Special characters', chars: charsOf([7]) },
+  { label: 'Symbols', chars: charsOf([7]) },
 ]
