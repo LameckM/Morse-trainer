@@ -121,6 +121,7 @@ export default function MorseTrainer() {
   const [roundResult, setRoundResult] = useState(null)
   const [streak, setStreak] = useState(0)
   const [learnCategory, setLearnCategory] = useState('All')
+  const [practiceCategory, setPracticeCategory] = useState('Letters')
 
   const pressStart = useRef(null)
   const gapTimer = useRef(null)
@@ -130,6 +131,9 @@ export default function MorseTrainer() {
   const lesson = LESSONS.find((l) => l.id === lessonId)
   const targetChar = order[index]
   const targetPattern = MORSE[targetChar]
+  const practiceGroupLabel = practiceCategory === 'Special characters' ? 'Symbols' : practiceCategory
+  const practiceChars = REFERENCE_GROUPS.find((group) => group.label === practiceGroupLabel)?.chars ?? REFERENCE_GROUPS[0].chars
+  const activeChars = mode === 'practice' ? practiceChars : lesson.chars
   const visibleReferenceGroups = learnCategory === 'All'
     ? REFERENCE_GROUPS
     : REFERENCE_GROUPS.filter((group) => group.label === learnCategory)
@@ -203,8 +207,10 @@ export default function MorseTrainer() {
         if (index + 1 >= order.length) {
           const passed = newCorrect >= needed(order.length)
           setRoundResult({ correct: newCorrect, total: order.length, passed })
-          if (passed) setCompleted((c) => (c.includes(lessonId) ? c : [...c, lessonId]))
-          setOrder(shuffle(lesson.chars))
+          if (passed && mode !== 'practice') {
+            setCompleted((c) => (c.includes(lessonId) ? c : [...c, lessonId]))
+          }
+          setOrder(shuffle(activeChars))
           setIndex(0)
           setCorrect(0)
         } else {
@@ -251,7 +257,14 @@ export default function MorseTrainer() {
   const changeMode = (m) => {
     if (m === mode) return
     setMode(m)
-    resetRound(lesson.chars)
+    resetRound(m === 'practice' ? practiceChars : lesson.chars)
+  }
+
+  const selectPracticeCategory = (category) => {
+    setPracticeCategory(category)
+    const groupLabel = category === 'Special characters' ? 'Symbols' : category
+    const chars = REFERENCE_GROUPS.find((group) => group.label === groupLabel)?.chars ?? []
+    resetRound(chars)
   }
 
   const selectLesson = (id) => {
@@ -279,7 +292,7 @@ export default function MorseTrainer() {
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <p className="font-medium">{mode === 'learn' ? 'All characters' : lesson.label}</p>
+          <p className="font-medium">{mode === 'learn' ? 'All characters' : mode === 'practice' ? `Practice: ${practiceCategory}` : lesson.label}</p>
           <p className="text-sm text-neutral-400">{subtitle}</p>
         </div>
         <div className="flex gap-1 bg-panel border border-line rounded-lg p-1">
@@ -458,44 +471,81 @@ export default function MorseTrainer() {
           )}
         </div>
 
-        <div className={mode === 'learn' ? 'hidden' : ''}>
-          <p className="text-sm text-neutral-500 mb-1">Lessons</p>
-          <p className="text-xs text-neutral-600 mb-3">
-            Score {Math.round(PASS_RATE * 100)}% in a round to unlock the next one
-          </p>
-          <div className="flex flex-col gap-2">
-            {LESSONS.map((l, idx) => {
-              const isLocked = idx > 0 && !completed.includes(LESSONS[idx - 1].id)
-              const isDone = completed.includes(l.id)
-              const isActive = l.id === lessonId
-              return (
-                <button
-                  key={l.id}
-                  disabled={isLocked}
-                  onClick={() => selectLesson(l.id)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left transition-colors ${
-                    isActive ? 'border-signal' : 'border-line'
-                  } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
-                >
-                  {isDone ? (
-                    <Check size={14} className="text-green-400" />
-                  ) : isLocked ? (
-                    <Lock size={14} className="text-neutral-500" />
-                  ) : (
-                    <Zap size={14} className="text-signal" />
-                  )}
-                  <span className={isLocked ? 'text-neutral-500' : ''}>{l.label}</span>
-                </button>
-              )
-            })}
+        {mode === 'practice' ? (
+          <div>
+            <p className="text-sm text-neutral-500 mb-1">Choose a practice group</p>
+            <p className="text-xs text-neutral-600 mb-3">
+              Practice one type of Morse code at a time. Each round uses only the selected group.
+            </p>
+            <div className="flex flex-col gap-2">
+              {[
+                { label: 'Letters', group: 'Letters' },
+                { label: 'Numbers', group: 'Numbers' },
+                { label: 'Special characters', group: 'Symbols' },
+                { label: 'Punctuation', group: 'Punctuation' },
+              ].map(({ label, group }) => {
+                const chars = REFERENCE_GROUPS.find((item) => item.label === group)?.chars ?? []
+                const isActive = practiceCategory === label
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => selectPracticeCategory(label)}
+                    aria-pressed={isActive}
+                    className={`flex items-center justify-between gap-3 px-3 py-3 rounded-lg border text-sm text-left transition-colors ${
+                      isActive ? 'border-signal bg-signal/5' : 'border-line hover:border-neutral-600'
+                    }`}
+                  >
+                    <span className="font-medium">{label}</span>
+                    <span className="text-xs text-neutral-500">{chars.length} characters</span>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-neutral-500 mt-4">
+              Your practice group does not depend on lesson unlocks.
+            </p>
           </div>
-          <button
-            onClick={clearProgress}
-            className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors mt-4"
-          >
-            <Trash2 size={13} /> Clear progress
-          </button>
-        </div>
+        ) : mode === 'test' ? (
+          <div>
+            <p className="text-sm text-neutral-500 mb-1">Lessons</p>
+            <p className="text-xs text-neutral-600 mb-3">
+              Score {Math.round(PASS_RATE * 100)}% in a round to unlock the next one
+            </p>
+            <div className="flex flex-col gap-2">
+              {LESSONS.map((l, idx) => {
+                const isLocked = idx > 0 && !completed.includes(LESSONS[idx - 1].id)
+                const isDone = completed.includes(l.id)
+                const isActive = l.id === lessonId
+                return (
+                  <button
+                    key={l.id}
+                    disabled={isLocked}
+                    onClick={() => selectLesson(l.id)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left transition-colors ${
+                      isActive ? 'border-signal' : 'border-line'
+                    } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
+                  >
+                    {isDone ? (
+                      <Check size={14} className="text-green-400" />
+                    ) : isLocked ? (
+                      <Lock size={14} className="text-neutral-500" />
+                    ) : (
+                      <Zap size={14} className="text-signal" />
+                    )}
+                    <span className={isLocked ? 'text-neutral-500' : ''}>{l.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <button
+              onClick={clearProgress}
+              className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors mt-4"
+            >
+              <Trash2 size={13} /> Clear progress
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   )
