@@ -460,7 +460,7 @@ export default function MorseTrainer() {
                 >
                   Round done: {roundResult.correct} of {roundResult.total}.{' '}
                   {roundResult.passed
-                    ? 'Lesson passed.'
+                    ? mode === 'practice' ? 'Practice round completed.' : 'Lesson passed.'
                     : `You need ${needed(roundResult.total)} to pass, go again.`}
                 </p>
               )}
