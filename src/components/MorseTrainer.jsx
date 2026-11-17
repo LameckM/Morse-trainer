@@ -5,16 +5,46 @@ import { Check, Lock, Zap, Trash2 } from 'lucide-react'
 const DOT_MS = 120
 const DASH_THRESHOLD_MS = 250
 const GAP_MS = 900
+const RAMP_S = 0.01
+const PASS_RATE = 0.75
+const CORRECT_DELAY_MS = 700
+const WRONG_DELAY_MS = 1500
 const PROGRESS_KEY = 'a4o-morse-progress'
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const needed = (total) => Math.ceil(PASS_RATE * total)
+const speak = (pattern) => [...pattern].map((s) => (s === '.' ? 'dot' : 'dash')).join(' ')
+
+function shuffle(items) {
+  const arr = [...items]
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
+
+function PatternBars({ pattern }) {
+  return (
+    <span className="inline-flex items-center gap-1" aria-hidden="true">
+      {[...pattern].map((s, i) => (
+        <span key={i} className={`bg-signal rounded-sm h-2 ${s === '.' ? 'w-2' : 'w-6'}`} />
+      ))}
+    </span>
+  )
+}
 
 function useBeep() {
   const ctxRef = useRef(null)
   const activeRef = useRef(null)
+  const playToken = useRef(0)
 
   const getCtx = () => {
     if (!ctxRef.current) {
       ctxRef.current = new (window.AudioContext || window.webkitAudioContext)()
     }
+    // Safari and iOS create the context suspended until a user gesture resumes it.
+    if (ctxRef.current.state === 'suspended') ctxRef.current.resume()
     return ctxRef.current
   }
 
@@ -25,41 +55,54 @@ function useBeep() {
     const gain = ctx.createGain()
     osc.frequency.value = 600
     osc.type = 'sine'
-    gain.gain.value = 0.15
+    // Short fade in and out so the tone doesn't click.
+    gain.gain.setValueAtTime(0, ctx.currentTime)
+    gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + RAMP_S)
     osc.connect(gain)
     gain.connect(ctx.destination)
     osc.start()
-    activeRef.current = osc
+    activeRef.current = { osc, gain, ctx }
   }
 
   const stop = () => {
-    if (activeRef.current) {
-      activeRef.current.stop()
-      activeRef.current.disconnect()
-      activeRef.current = null
+    const active = activeRef.current
+    if (!active) return
+    activeRef.current = null
+    const { osc, gain, ctx } = active
+    const now = ctx.currentTime
+    gain.gain.cancelScheduledValues(now)
+    gain.gain.setValueAtTime(gain.gain.value, now)
+    gain.gain.linearRampToValueAtTime(0, now + RAMP_S)
+    osc.stop(now + RAMP_S)
+    osc.onended = () => {
+      osc.disconnect()
+      gain.disconnect()
     }
   }
 
+  // Stops any pattern that is currently playing.
+  const cancel = () => {
+    playToken.current += 1
+    stop()
+  }
+
+  // Starting a new pattern cancels the previous one, so double taps restart instead of overlapping.
   const playPattern = async (pattern) => {
+    const token = ++playToken.current
     for (const symbol of pattern) {
-      const duration = symbol === '.' ? DOT_MS : DOT_MS * 3
+      if (token !== playToken.current) return
       start()
-      await new Promise((r) => setTimeout(r, duration))
+      await sleep(symbol === '.' ? DOT_MS : DOT_MS * 3)
+      if (token !== playToken.current) return
       stop()
-      await new Promise((r) => setTimeout(r, DOT_MS))
+      await sleep(DOT_MS)
     }
   }
 
-  return { start, stop, playPattern }
+  return { start, stop, playPattern, cancel }
 }
 
 export default function MorseTrainer() {
-  const [lessonId, setLessonId] = useState(1)
-  const [mode, setMode] = useState('practice')
-  const [charIndex, setCharIndex] = useState(0)
-  const [buffer, setBuffer] = useState([])
-  const [feedback, setFeedback] = useState(null)
-  const [streak, setStreak] = useState(0)
   const [completed, setCompleted] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || []
@@ -67,31 +110,42 @@ export default function MorseTrainer() {
       return []
     }
   })
+  const [lessonId, setLessonId] = useState(LESSONS[0].id)
+  const [mode, setMode] = useState(() => (completed.length ? 'practice' : 'learn'))
+  const [order, setOrder] = useState(() => shuffle(LESSONS[0].chars))
+  const [index, setIndex] = useState(0)
+  const [correct, setCorrect] = useState(0)
+  const [buffer, setBuffer] = useState([])
+  const [feedback, setFeedback] = useState(null)
+  const [guess, setGuess] = useState(null)
+  const [roundResult, setRoundResult] = useState(null)
+  const [streak, setStreak] = useState(0)
 
   const pressStart = useRef(null)
   const gapTimer = useRef(null)
-  const { start, stop, playPattern } = useBeep()
+  const feedbackTimer = useRef(null)
+  const { start, stop, playPattern, cancel } = useBeep()
 
   const lesson = LESSONS.find((l) => l.id === lessonId)
-  const targetChar = lesson.chars[charIndex]
+  const targetChar = order[index]
   const targetPattern = MORSE[targetChar]
 
   useEffect(() => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(completed))
   }, [completed])
 
+  // Practice mode owns the spacebar. In other modes it keeps its normal job (pressing focused buttons).
   useEffect(() => {
+    if (mode !== 'practice') return
     const onKeyDown = (e) => {
-      if (e.code === 'Space' && !e.repeat) {
-        e.preventDefault()
-        handleDown()
-      }
+      if (e.code !== 'Space') return
+      e.preventDefault()
+      if (!e.repeat) handleDown()
     }
     const onKeyUp = (e) => {
-      if (e.code === 'Space') {
-        e.preventDefault()
-        handleUp()
-      }
+      if (e.code !== 'Space') return
+      e.preventDefault()
+      handleUp()
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
@@ -101,62 +155,103 @@ export default function MorseTrainer() {
     }
   })
 
-  const clearGapTimer = () => {
-    if (gapTimer.current) clearTimeout(gapTimer.current)
+  useEffect(() => {
+    return () => {
+      clearTimers()
+      cancel()
+    }
+  }, [])
+
+  const clearTimers = () => {
+    clearTimeout(gapTimer.current)
+    clearTimeout(feedbackTimer.current)
+    gapTimer.current = null
+    feedbackTimer.current = null
+  }
+
+  // Throws away anything in flight (timers, sounds, half-sent letters) and starts a fresh shuffled round.
+  const resetRound = (chars) => {
+    clearTimers()
+    cancel()
+    pressStart.current = null
+    setOrder(shuffle(chars))
+    setIndex(0)
+    setCorrect(0)
+    setBuffer([])
+    setFeedback(null)
+    setGuess(null)
+    setRoundResult(null)
   }
 
   const advance = (wasCorrect) => {
+    if (index === 0) setRoundResult(null)
     setFeedback(wasCorrect ? 'correct' : 'wrong')
     setStreak((s) => (wasCorrect ? s + 1 : 0))
-    setTimeout(() => {
-      setFeedback(null)
-      setBuffer([])
-      if (charIndex + 1 >= lesson.chars.length) {
-        setCompleted((c) => (c.includes(lessonId) ? c : [...c, lessonId]))
-        setCharIndex(0)
-      } else {
-        setCharIndex((i) => i + 1)
-      }
-    }, 700)
+    const newCorrect = correct + (wasCorrect ? 1 : 0)
+    setCorrect(newCorrect)
+
+    feedbackTimer.current = setTimeout(
+      () => {
+        setFeedback(null)
+        setGuess(null)
+        setBuffer([])
+        if (index + 1 >= order.length) {
+          const passed = newCorrect >= needed(order.length)
+          setRoundResult({ correct: newCorrect, total: order.length, passed })
+          if (passed) setCompleted((c) => (c.includes(lessonId) ? c : [...c, lessonId]))
+          setOrder(shuffle(lesson.chars))
+          setIndex(0)
+          setCorrect(0)
+        } else {
+          setIndex((i) => i + 1)
+        }
+      },
+      wasCorrect ? CORRECT_DELAY_MS : WRONG_DELAY_MS
+    )
   }
 
   const handleDown = () => {
     if (feedback || mode !== 'practice') return
     if (pressStart.current !== null) return
-    clearGapTimer()
-    pressStart.current = Date.now()
+    clearTimeout(gapTimer.current)
+    pressStart.current = performance.now()
     start()
   }
 
   const handleUp = () => {
     if (pressStart.current === null) return
     stop()
-    const duration = Date.now() - pressStart.current
+    const duration = performance.now() - pressStart.current
     pressStart.current = null
     const symbol = duration < DASH_THRESHOLD_MS ? '.' : '-'
     const next = [...buffer, symbol]
     setBuffer(next)
-    clearGapTimer()
+    clearTimeout(gapTimer.current)
     gapTimer.current = setTimeout(() => {
       advance(next.join('') === targetPattern)
     }, GAP_MS)
   }
 
   const runTest = async () => {
-    setFeedback(null)
+    if (feedback) return
     await playPattern(targetPattern)
   }
 
   const handleGuess = (letter) => {
     if (feedback) return
+    setGuess(letter)
     advance(letter === targetChar)
+  }
+
+  const changeMode = (m) => {
+    if (m === mode) return
+    setMode(m)
+    resetRound(lesson.chars)
   }
 
   const selectLesson = (id) => {
     setLessonId(id)
-    setCharIndex(0)
-    setBuffer([])
-    setFeedback(null)
+    resetRound(LESSONS.find((l) => l.id === id).chars)
   }
 
   const clearProgress = () => {
@@ -165,30 +260,28 @@ export default function MorseTrainer() {
     localStorage.removeItem(PROGRESS_KEY)
     setCompleted([])
     setLessonId(LESSONS[0].id)
-    setCharIndex(0)
-    setBuffer([])
-    setFeedback(null)
+    resetRound(LESSONS[0].chars)
     setStreak(0)
   }
+
+  const subtitle = {
+    learn: 'See each pattern and hear how it sounds',
+    practice: 'Hold the button or spacebar to key',
+    test: 'Listen, then pick the character',
+  }[mode]
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <p className="font-medium">{lesson.label}</p>
-          <p className="text-sm text-neutral-400">
-            {mode === 'practice' ? 'Hold the button or spacebar to key' : 'Listen, then pick the letter'}
-          </p>
+          <p className="text-sm text-neutral-400">{subtitle}</p>
         </div>
         <div className="flex gap-1 bg-panel border border-line rounded-lg p-1">
-          {['practice', 'test'].map((m) => (
+          {['learn', 'practice', 'test'].map((m) => (
             <button
               key={m}
-              onClick={() => {
-                setMode(m)
-                setBuffer([])
-                setFeedback(null)
-              }}
+              onClick={() => changeMode(m)}
               className={`text-sm px-3 py-1.5 rounded-md capitalize ${
                 mode === m ? 'bg-ink text-neutral-100' : 'text-neutral-400'
               }`}
@@ -201,18 +294,41 @@ export default function MorseTrainer() {
 
       <div className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr] gap-5">
         <div className="bg-panel border border-line rounded-xl p-8 flex flex-col items-center">
-          {mode === 'practice' ? (
+          {mode === 'learn' && (
             <>
-              <p className="text-sm text-neutral-500 mb-4">Send the letter</p>
+              <p className="text-sm text-neutral-500 mb-4">Tap a character to hear it</p>
+              <div className="grid grid-cols-2 gap-2 w-full">
+                {lesson.chars.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => playPattern(MORSE[c])}
+                    aria-label={`${c}, ${speak(MORSE[c])}. Play sound`}
+                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-line hover:border-neutral-600 transition-colors"
+                  >
+                    <span className="font-display text-lg">{c}</span>
+                    <PatternBars pattern={MORSE[c]} />
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-neutral-500 mt-6">Got them? Switch to Practice or Test.</p>
+            </>
+          )}
+
+          {mode === 'practice' && (
+            <>
+              <p className="text-sm text-neutral-500 mb-4">Send this character</p>
               <p className="font-display text-4xl mb-6">{targetChar}</p>
               <button
-                onMouseDown={handleDown}
-                onMouseUp={handleUp}
-                onMouseLeave={() => pressStart.current !== null && handleUp()}
-                onTouchStart={handleDown}
-                onTouchEnd={handleUp}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.currentTarget.setPointerCapture?.(e.pointerId)
+                  handleDown()
+                }}
+                onPointerUp={handleUp}
+                onPointerCancel={handleUp}
+                onContextMenu={(e) => e.preventDefault()}
                 aria-label="Key a dot or dash"
-                className={`w-24 h-24 rounded-full border-2 flex items-center justify-center transition-colors select-none ${
+                className={`w-24 h-24 rounded-full border-2 flex items-center justify-center transition-colors select-none touch-none ${
                   feedback === 'correct'
                     ? 'bg-green-500/20 border-green-500'
                     : feedback === 'wrong'
@@ -238,12 +354,14 @@ export default function MorseTrainer() {
                 ))}
               </div>
             </>
-          ) : (
+          )}
+
+          {mode === 'test' && (
             <>
               <p className="text-sm text-neutral-500 mb-4">Play the sound, then guess</p>
               <button
                 onClick={runTest}
-                aria-label="Play the letter's morse pattern"
+                aria-label="Play the character's morse pattern"
                 className="w-24 h-24 rounded-full border-2 border-signal bg-signal/10 flex items-center justify-center mb-6"
               >
                 <Zap size={28} className="text-signal" />
@@ -254,9 +372,9 @@ export default function MorseTrainer() {
                     key={c}
                     onClick={() => handleGuess(c)}
                     className={`py-2 rounded-md border text-sm font-medium transition-colors ${
-                      feedback && c === targetChar && feedback === 'correct'
+                      feedback && c === targetChar
                         ? 'border-green-500 bg-green-500/10'
-                        : feedback && c === targetChar && feedback === 'wrong'
+                        : feedback === 'wrong' && c === guess
                         ? 'border-red-500 bg-red-500/10'
                         : 'border-line hover:border-neutral-600'
                     }`}
@@ -267,11 +385,44 @@ export default function MorseTrainer() {
               </div>
             </>
           )}
-          <p className="text-xs text-neutral-500 mt-6">Streak: {streak}</p>
+
+          {mode !== 'learn' && (
+            <>
+              <div aria-live="polite" className="mt-4 min-h-[2rem] text-sm flex items-center gap-2">
+                {feedback === 'correct' && <span className="text-green-400">Correct</span>}
+                {feedback === 'wrong' && (
+                  <>
+                    <span className="text-red-400">Not quite, {targetChar} is</span>
+                    <PatternBars pattern={targetPattern} />
+                    <span className="sr-only">{speak(targetPattern)}</span>
+                  </>
+                )}
+              </div>
+              {roundResult && (
+                <p
+                  aria-live="polite"
+                  className={`text-sm mt-2 text-center ${
+                    roundResult.passed ? 'text-green-400' : 'text-neutral-300'
+                  }`}
+                >
+                  Round done: {roundResult.correct} of {roundResult.total}.{' '}
+                  {roundResult.passed
+                    ? 'Lesson passed.'
+                    : `You need ${needed(roundResult.total)} to pass, go again.`}
+                </p>
+              )}
+              <p className="text-xs text-neutral-500 mt-4">
+                Character {index + 1} of {order.length} · Streak: {streak}
+              </p>
+            </>
+          )}
         </div>
 
         <div>
-          <p className="text-sm text-neutral-500 mb-3">Lessons</p>
+          <p className="text-sm text-neutral-500 mb-1">Lessons</p>
+          <p className="text-xs text-neutral-600 mb-3">
+            Score {Math.round(PASS_RATE * 100)}% in a round to unlock the next one
+          </p>
           <div className="flex flex-col gap-2">
             {LESSONS.map((l, idx) => {
               const isLocked = idx > 0 && !completed.includes(LESSONS[idx - 1].id)

@@ -1,16 +1,18 @@
 # Morse trainer
 
-A small interactive morse code trainer. Two modes: practice sending letters by hand-timed input, and test yourself by ear.
+A small interactive morse code trainer. Three modes: learn the patterns, practice sending them by hand-timed input, and test yourself by ear.
 
-**Live demo:** not availabel at the moment.
+**Live demo:** not available at the moment.
 
 ## What it does
 
-Practice mode reads your actual press timing. Tap for a dot, hold for a dash, using mouse, touch, or the spacebar. It decodes what you sent and checks it against the target letter.
+Learn mode shows the dot and dash pattern for every character in the lesson. Tap one to hear it.
 
-Test mode plays the real morse audio for a letter through the Web Audio API, then you pick the letter from a multiple-choice grid.
+Practice mode reads your actual press timing. Tap for a dot, hold for a dash, using mouse, touch, or the spacebar. It decodes what you sent and checks it against the target character. On a miss it shows the correct pattern before moving on.
 
-There are seven lessons: A-D, E-J, K-P, Q-Z, numbers, punctuation, and special characters, covering the full standard morse alphabet. They unlock in order, and progress is saved in localStorage so it's still there next time you open the page. Streak resets on a miss, standard drill-app behavior. There's a clear progress button under the lesson list if you want to wipe saved progress and start over, it asks for confirmation before it clears anything.
+Test mode plays the real morse audio for a character through the Web Audio API, then you pick the character from a multiple-choice grid.
+
+There are seven lessons: A-D, E-J, K-P, Q-Z, numbers, punctuation, and special characters, covering the full standard morse alphabet. Each round shuffles the lesson's characters, and you need to get 75% of them right to pass and unlock the next lesson. Progress is saved in localStorage so it's still there next time you open the page. Streak resets on a miss, standard drill-app behavior. There's a clear progress button under the lesson list if you want to wipe saved progress and start over, it asks for confirmation before it clears anything.
 
 ## Stack
 
