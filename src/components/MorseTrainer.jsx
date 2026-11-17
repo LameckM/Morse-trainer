@@ -683,7 +683,7 @@ export default function MorseTrainer() {
                       </>
                 )}
               </div>
-              {roundResult && (
+              {roundResult && mode !== 'test' && (
                 <p
                   aria-live="polite"
                   className={`text-sm mt-2 text-center ${
