@@ -9,6 +9,7 @@ const RAMP_S = 0.01
 const PASS_RATE = 0.75
 const PRACTICE_PASS_RATE = 0.9
 const PRACTICE_LETTER_PROGRESS_KEY = 'a4o-morse-practice-letter-progress'
+const PRACTICE_GROUP_PROGRESS_KEY = 'a4o-morse-practice-group-progress'
 const CORRECT_DELAY_MS = 700
 const WRONG_DELAY_MS = 1500
 const PROGRESS_KEY = 'a4o-morse-progress'
@@ -126,6 +127,14 @@ export default function MorseTrainer() {
   const [learnCategory, setLearnCategory] = useState('All')
   const [practiceCategory, setPracticeCategory] = useState('Letters')
   const [practiceLetterSectionId, setPracticeLetterSectionId] = useState(1)
+  const [practiceGroupStage, setPracticeGroupStage] = useState(1)
+  const [completedPracticeGroupStages, setCompletedPracticeGroupStages] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(PRACTICE_GROUP_PROGRESS_KEY)) || []
+    } catch {
+      return []
+    }
+  })
   const [completedPracticeLetterSections, setCompletedPracticeLetterSections] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(PRACTICE_LETTER_PROGRESS_KEY)) || []
@@ -144,9 +153,13 @@ export default function MorseTrainer() {
   const targetPattern = MORSE[targetChar]
   const practiceGroupLabel = practiceCategory === 'Special characters' ? 'Symbols' : practiceCategory
   const practiceLetterSection = LESSONS.find((item) => item.id === practiceLetterSectionId)
+  const selectedPracticeGroup = REFERENCE_GROUPS.find((group) => group.label === practiceGroupLabel)
+  const practiceGroupStages = selectedPracticeGroup
+    ? [selectedPracticeGroup.chars.slice(0, selectedPracticeGroup.chars.length / 2), selectedPracticeGroup.chars.slice(selectedPracticeGroup.chars.length / 2)]
+    : []
   const practiceChars = practiceCategory === 'Letters'
     ? practiceLetterSection.chars
-    : REFERENCE_GROUPS.find((group) => group.label === practiceGroupLabel)?.chars ?? REFERENCE_GROUPS[0].chars
+    : practiceGroupStages[practiceGroupStage - 1] ?? []
   const activeChars = mode === 'practice' ? practiceChars : lesson.chars
   const visibleReferenceGroups = learnCategory === 'All'
     ? REFERENCE_GROUPS
@@ -160,6 +173,10 @@ export default function MorseTrainer() {
   useEffect(() => {
     localStorage.setItem(PRACTICE_LETTER_PROGRESS_KEY, JSON.stringify(completedPracticeLetterSections))
   }, [completedPracticeLetterSections])
+
+  useEffect(() => {
+    localStorage.setItem(PRACTICE_GROUP_PROGRESS_KEY, JSON.stringify(completedPracticeGroupStages))
+  }, [completedPracticeGroupStages])
 
   // Practice mode owns the spacebar. In other modes it keeps its normal job (pressing focused buttons).
   useEffect(() => {
@@ -234,6 +251,12 @@ export default function MorseTrainer() {
                 : [...sections, practiceLetterSectionId]
             )
           }
+          if (passed && mode === 'practice' && practiceCategory !== 'Letters') {
+            const stageKey = `${practiceCategory}-${practiceGroupStage}`
+            setCompletedPracticeGroupStages((stages) =>
+              stages.includes(stageKey) ? stages : [...stages, stageKey]
+            )
+          }
           if (passed && mode !== 'practice') {
             setCompleted((c) => (c.includes(lessonId) ? c : [...c, lessonId]))
           }
@@ -289,11 +312,24 @@ export default function MorseTrainer() {
 
   const selectPracticeCategory = (category) => {
     setPracticeCategory(category)
+    if (category === 'Letters') {
+      resetRound(practiceLetterSection.chars)
+      return
+    }
+    setPracticeGroupStage(1)
     const groupLabel = category === 'Special characters' ? 'Symbols' : category
-    const chars = category === 'Letters'
-      ? practiceLetterSection.chars
-      : REFERENCE_GROUPS.find((group) => group.label === groupLabel)?.chars ?? []
-    resetRound(chars)
+    const chars = REFERENCE_GROUPS.find((group) => group.label === groupLabel)?.chars ?? []
+    resetRound(chars.slice(0, chars.length / 2))
+  }
+
+  const selectPracticeGroupStage = (stage) => {
+    const stageKey = `${practiceCategory}-${stage - 1}`
+    if (stage > 1 && !completedPracticeGroupStages.includes(stageKey)) return
+    setPracticeGroupStage(stage)
+    const groupLabel = practiceCategory === 'Special characters' ? 'Symbols' : practiceCategory
+    const chars = REFERENCE_GROUPS.find((group) => group.label === groupLabel)?.chars ?? []
+    const midpoint = chars.length / 2
+    resetRound(stage === 1 ? chars.slice(0, midpoint) : chars.slice(midpoint))
   }
 
   const selectPracticeLetterSection = (id) => {
@@ -315,11 +351,15 @@ export default function MorseTrainer() {
     if (!ok) return
     localStorage.removeItem(PROGRESS_KEY)
     localStorage.removeItem(PRACTICE_LETTER_PROGRESS_KEY)
+    localStorage.removeItem(PRACTICE_GROUP_PROGRESS_KEY)
     setCompleted([])
     setCompletedPracticeLetterSections([])
+    setCompletedPracticeGroupStages([])
     setLessonId(LESSONS[0].id)
     setPracticeLetterSectionId(1)
-    resetRound(mode === 'practice' ? LESSONS[0].chars : LESSONS[0].chars)
+    setPracticeGroupStage(1)
+    setPracticeCategory('Letters')
+    resetRound(LESSONS[0].chars)
     setStreak(0)
   }
 
@@ -519,67 +559,87 @@ export default function MorseTrainer() {
               Practice one type of Morse code at a time. Each round uses only the selected group.
             </p>
             <div className="flex flex-col gap-2">
-              <div className={`rounded-lg border p-3 ${practiceCategory === 'Letters' ? 'border-signal bg-signal/5' : 'border-line'}`}>
-                <button
-                  type="button"
-                  onClick={() => selectPracticeCategory('Letters')}
-                  aria-pressed={practiceCategory === 'Letters'}
-                  className="w-full flex items-center justify-between gap-3 text-sm text-left"
-                >
-                  <span className="font-medium">Letters</span>
-                  <span className="text-xs text-neutral-500">A–Z · 4 sections</span>
-                </button>
-                <div className="flex flex-col gap-2 mt-3">
-                  {LESSONS.filter((item) => item.id <= 4).map((section, index) => {
-                    const isLocked = index > 0 && !completedPracticeLetterSections.includes(LESSONS[index - 1].id)
-                    const isDone = completedPracticeLetterSections.includes(section.id)
-                    const isActive = practiceCategory === 'Letters' && practiceLetterSectionId === section.id
-                    return (
-                      <button
-                        key={section.id}
-                        type="button"
-                        disabled={isLocked}
-                        onClick={() => selectPracticeLetterSection(section.id)}
-                        aria-pressed={isActive}
-                        className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs text-left ${
-                          isActive ? 'border-signal text-signal' : 'border-line'
-                        } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
-                      >
-                        <span className="flex items-center gap-2">
-                          {isDone ? <Check size={13} className="text-green-400" /> : isLocked ? <Lock size={13} /> : null}
-                          {section.label}
-                        </span>
-                        <span className="text-neutral-500">{isDone ? 'Completed' : isLocked ? 'Locked' : '90% to unlock next'}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
               {[
+                { label: 'Letters', count: 'A–Z · 4 sections' },
                 { label: 'Numbers', group: 'Numbers' },
-                { label: 'Special characters', group: 'Symbols' },
                 { label: 'Punctuation', group: 'Punctuation' },
-              ].map(({ label, group }) => {
-                const chars = REFERENCE_GROUPS.find((item) => item.label === group)?.chars ?? []
+                { label: 'Special characters', group: 'Symbols' },
+              ].map(({ label, group, count }) => {
                 const isActive = practiceCategory === label
+                const chars = REFERENCE_GROUPS.find((item) => item.label === group)?.chars ?? []
+                const stageCount = label === 'Letters' ? 4 : 2
                 return (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => selectPracticeCategory(label)}
-                    aria-pressed={isActive}
-                    className={`flex items-center justify-between gap-3 px-3 py-3 rounded-lg border text-sm text-left transition-colors ${
-                      isActive ? 'border-signal bg-signal/5' : 'border-line hover:border-neutral-600'
-                    }`}
-                  >
-                    <span className="font-medium">{label}</span>
-                    <span className="text-xs text-neutral-500">{chars.length} characters</span>
-                  </button>
+                  <div key={label} className={`rounded-lg border p-3 ${isActive ? 'border-signal bg-signal/5' : 'border-line'}`}>
+                    <button
+                      type="button"
+                      onClick={() => selectPracticeCategory(label)}
+                      aria-pressed={isActive}
+                      className="w-full flex items-center justify-between gap-3 text-sm text-left"
+                    >
+                      <span className="font-medium">{label}</span>
+                      <span className="text-xs text-neutral-500">{count ?? `${chars.length} characters · 2 stages`}</span>
+                    </button>
+                    {isActive && (
+                      <div className="flex flex-col gap-2 mt-3">
+                        {label === 'Letters'
+                          ? LESSONS.filter((item) => item.id <= 4).map((section, index) => {
+                              const isLocked = index > 0 && !completedPracticeLetterSections.includes(LESSONS[index - 1].id)
+                              const isDone = completedPracticeLetterSections.includes(section.id)
+                              const isSelected = practiceLetterSectionId === section.id
+                              return (
+                                <button
+                                  key={section.id}
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={() => selectPracticeLetterSection(section.id)}
+                                  aria-pressed={isSelected}
+                                  className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs text-left ${
+                                    isSelected ? 'border-signal text-signal' : 'border-line'
+                                  } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    {isDone ? <Check size={13} className="text-green-400" /> : isLocked ? <Lock size={13} /> : null}
+                                    {section.label}
+                                  </span>
+                                  <span className="text-neutral-500">{isDone ? 'Completed' : isLocked ? 'Locked' : '90% to unlock next'}</span>
+                                </button>
+                              )
+                            })
+                          : Array.from({ length: stageCount }, (_, index) => {
+                              const stage = index + 1
+                              const stageKey = `${label}-${stage}`
+                              const isLocked = stage > 1 && !completedPracticeGroupStages.includes(`${label}-1`)
+                              const isDone = completedPracticeGroupStages.includes(stageKey)
+                              const isSelected = practiceGroupStage === stage
+                              const half = chars.length / 2
+                              const stageChars = stage === 1 ? chars.slice(0, half) : chars.slice(half)
+                              return (
+                                <button
+                                  key={stage}
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={() => selectPracticeGroupStage(stage)}
+                                  aria-pressed={isSelected}
+                                  className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs text-left ${
+                                    isSelected ? 'border-signal text-signal' : 'border-line'
+                                  } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    {isDone ? <Check size={13} className="text-green-400" /> : isLocked ? <Lock size={13} /> : null}
+                                    {label} {stage} · {stageChars.join(' ')}
+                                  </span>
+                                  <span className="text-neutral-500">{isDone ? 'Completed' : isLocked ? 'Locked' : '90% to unlock next'}</span>
+                                </button>
+                              )
+                            })}
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>
             <p className="text-xs text-neutral-500 mt-4">
-              Score at least 90% in a letter section to unlock the next one. Numbers, symbols, and punctuation remain available independently.
+              Score at least 90% in each stage to unlock the next stage. Each category keeps its own progress.
             </p>
             <button
               onClick={clearProgress}
