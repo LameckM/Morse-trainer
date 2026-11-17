@@ -14,7 +14,6 @@ export const MORSE = {
 }
 
 // Learn mode shows every group, whether or not its lesson is unlocked.
-// REFERENCE_GROUPS is declared after LESSONS below so it can reuse the same character lists.
 export const LESSONS = [
   { id: 1, label: 'Letters A-D', chars: ['A', 'B', 'C', 'D'] },
   { id: 2, label: 'Letters E-J', chars: ['E', 'F', 'G', 'H', 'I', 'J'] },
@@ -31,6 +30,5 @@ export const REFERENCE_GROUPS = [
   { label: 'Letters', chars: charsOf([1, 2, 3, 4]).sort() },
   { label: 'Numbers', chars: charsOf([5]) },
   { label: 'Punctuation', chars: ['.', ',', '?', "'", '!', '-', '/', '(', ')', ':', ';', '&'] },
-  { label: 'Symbols', chars: ['=', '+', '_', '"', '
-, '@'] },
+  { label: 'Symbols', chars: ['=', '+', '_', '"', '$', '@'] },
 ]
