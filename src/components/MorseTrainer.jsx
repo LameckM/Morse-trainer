@@ -806,41 +806,66 @@ export default function MorseTrainer() {
           </div>
         ) : mode === 'test' ? (
           <div>
-            <p className="text-sm text-neutral-500 mb-1">Lessons</p>
-            <p className="text-xs text-neutral-600 mb-3">
-              Score {Math.round(PASS_RATE * 100)}% in a round to unlock the next one
-            </p>
-            <div className="flex flex-col gap-2">
+            <div className="mb-4">
+              <p className="text-sm font-semibold text-neutral-200 mb-1">Assessment centre</p>
+              <p className="text-xs text-neutral-500">
+                Choose a lesson to test your Morse-code knowledge. Score {Math.round(PASS_RATE * 100)}% to unlock the next lesson.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {LESSONS.map((l, idx) => {
                 const isLocked = idx > 0 && !completed.includes(LESSONS[idx - 1].id)
                 const isDone = completed.includes(l.id)
                 const isActive = l.id === lessonId
+                const status = isDone ? 'Passed' : isLocked ? 'Locked' : isActive ? 'Ready to test' : 'Available'
                 return (
                   <button
                     key={l.id}
+                    type="button"
                     disabled={isLocked}
                     onClick={() => selectLesson(l.id)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left transition-colors ${
-                      isActive ? 'border-signal' : 'border-line'
-                    } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
+                    aria-pressed={isActive}
+                    className={`group rounded-xl border p-4 text-left transition-all ${
+                      isActive
+                        ? 'border-signal bg-signal/10 shadow-sm'
+                        : isLocked
+                        ? 'border-line bg-panel opacity-55 cursor-not-allowed'
+                        : 'border-line bg-panel hover:border-signal/60 hover:bg-signal/5'
+                    }`}
                   >
-                    {isDone ? (
-                      <Check size={14} className="text-green-400" />
-                    ) : isLocked ? (
-                      <Lock size={14} className="text-neutral-500" />
-                    ) : (
-                      <Zap size={14} className="text-signal" />
-                    )}
-                    <span className={isLocked ? 'text-neutral-500' : ''}>{l.label}</span>
+                    <div className="flex items-start justify-between gap-2 mb-4">
+                      <span className="text-xs uppercase tracking-wider text-neutral-500">Lesson {idx + 1}</span>
+                      {isDone ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-green-400"><Check size={13} /> Passed</span>
+                      ) : isLocked ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-neutral-500"><Lock size={13} /> Locked</span>
+                      ) : isActive ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-signal"><Zap size={13} /> Ready</span>
+                      ) : (
+                        <span className="text-xs text-neutral-500">Available</span>
+                      )}
+                    </div>
+                    <p className={`font-semibold text-sm mb-1 ${isLocked ? 'text-neutral-500' : 'text-neutral-100'}`}>{l.label}</p>
+                    <p className="text-xs text-neutral-500">
+                      {l.chars.length} {l.chars.length === 1 ? 'character' : 'characters'} · 15 questions
+                    </p>
+                    <div className="mt-4 pt-3 border-t border-line flex items-center justify-between">
+                      <span className="text-xs text-neutral-500">{isDone ? 'Assessment passed' : isLocked ? 'Pass previous lesson first' : 'Mixed assessment'}</span>
+                      {!isLocked && <span className="text-xs font-medium text-signal">{isActive ? 'Selected' : 'Open'} →</span>}
+                    </div>
                   </button>
                 )
               })}
+            </div>
+            <div className="mt-4 rounded-lg border border-line bg-ink/40 p-3">
+              <p className="text-xs font-medium text-neutral-300 mb-1">Assessment format</p>
+              <p className="text-xs text-neutral-500">Each test contains visual recognition, Morse recall and listening questions. Your score and corrections appear at the end.</p>
             </div>
             <button
               onClick={clearProgress}
               className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors mt-4"
             >
-              <Trash2 size={13} /> Clear progress
+              <Trash2 size={13} /> Reset progress
             </button>
           </div>
         ) : null}
