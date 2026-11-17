@@ -13,6 +13,9 @@ const PRACTICE_GROUP_PROGRESS_KEY = 'a4o-morse-practice-group-progress'
 const CORRECT_DELAY_MS = 700
 const WRONG_DELAY_MS = 1500
 const PROGRESS_KEY = 'a4o-morse-progress'
+const TEST_WEAK_KEY = 'a4o-morse-test-weak-characters'
+const TEST_LENGTH = 15
+const TEST_REPLAYS = 2
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const needed = (total, rate = PASS_RATE) => Math.ceil(rate * total)
@@ -26,6 +29,23 @@ function shuffle(items) {
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
   return arr
+}
+
+function createTestQuestions(chars) {
+  const types = shuffle([
+    ...Array(5).fill('visual'),
+    ...Array(5).fill('recall'),
+    ...Array(5).fill('listening'),
+  ])
+  return types.map((type) => {
+    const char = chars[Math.floor(Math.random() * chars.length)]
+    const distractors = shuffle(chars.filter((item) => item !== char)).slice(0, 3)
+    return {
+      type,
+      char,
+      options: shuffle([char, ...distractors]),
+    }
+  })
 }
 
 function PatternBars({ pattern }) {
@@ -124,6 +144,18 @@ export default function MorseTrainer() {
   const [guess, setGuess] = useState(null)
   const [roundResult, setRoundResult] = useState(null)
   const [streak, setStreak] = useState(0)
+  const [testQuestions, setTestQuestions] = useState([])
+  const [testIndex, setTestIndex] = useState(0)
+  const [testAnswers, setTestAnswers] = useState([])
+  const [testReplayCount, setTestReplayCount] = useState(0)
+  const [testComplete, setTestComplete] = useState(false)
+  const [testWeakCharacters, setTestWeakCharacters] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(TEST_WEAK_KEY)) || {}
+    } catch {
+      return {}
+    }
+  })
   const [learnCategory, setLearnCategory] = useState('All')
   const [practiceCategory, setPracticeCategory] = useState('Letters')
   const [practiceLetterSectionId, setPracticeLetterSectionId] = useState(1)
@@ -151,6 +183,8 @@ export default function MorseTrainer() {
   const lesson = LESSONS.find((l) => l.id === lessonId)
   const targetChar = order[index]
   const targetPattern = MORSE[targetChar]
+  const testQuestion = testQuestions[testIndex]
+  const testTargetPattern = testQuestion ? MORSE[testQuestion.char] : ''
   const practiceGroupLabel = practiceCategory === 'Special characters' ? 'Symbols' : practiceCategory
   const practiceLetterSection = LESSONS.find((item) => item.id === practiceLetterSectionId)
   const selectedPracticeGroup = REFERENCE_GROUPS.find((group) => group.label === practiceGroupLabel)
@@ -177,6 +211,10 @@ export default function MorseTrainer() {
   useEffect(() => {
     localStorage.setItem(PRACTICE_GROUP_PROGRESS_KEY, JSON.stringify(completedPracticeGroupStages))
   }, [completedPracticeGroupStages])
+
+  useEffect(() => {
+    localStorage.setItem(TEST_WEAK_KEY, JSON.stringify(testWeakCharacters))
+  }, [testWeakCharacters])
 
   // Practice mode owns the spacebar. In other modes it keeps its normal job (pressing focused buttons).
   useEffect(() => {
@@ -272,7 +310,8 @@ export default function MorseTrainer() {
   }
 
   const handleDown = () => {
-    if (feedback || mode !== 'practice') return
+    const isTestRecall = mode === 'test' && testQuestion?.type === 'recall' && !testComplete
+    if (feedback || (mode !== 'practice' && !isTestRecall)) return
     if (pressStart.current !== null) return
     clearTimeout(gapTimer.current)
     pressStart.current = performance.now()
@@ -289,25 +328,83 @@ export default function MorseTrainer() {
     setBuffer(next)
     clearTimeout(gapTimer.current)
     gapTimer.current = setTimeout(() => {
-      advance(next.join('') === targetPattern)
+      if (mode === 'test') submitTestAnswer(next.join(''))
+      else advance(next.join('') === targetPattern)
     }, GAP_MS)
   }
 
+  const startTest = (chars) => {
+    clearTimers()
+    cancel()
+    const questions = createTestQuestions(chars)
+    setTestQuestions(questions)
+    setTestIndex(0)
+    setTestAnswers([])
+    setTestReplayCount(0)
+    setTestComplete(false)
+    setFeedback(null)
+    setGuess(null)
+    setBuffer([])
+    setRoundResult(null)
+    setStreak(0)
+  }
+
+  const submitTestAnswer = (answer) => {
+    if (feedback || testComplete || !testQuestion) return
+    const isCorrect = testQuestion.type === 'recall'
+      ? answer === testTargetPattern
+      : answer === testQuestion.char
+    const record = {
+      char: testQuestion.char,
+      type: testQuestion.type,
+      answer,
+      correct: isCorrect,
+    }
+    const answers = [...testAnswers, record]
+    setTestAnswers(answers)
+    setFeedback(isCorrect ? 'correct' : 'wrong')
+    setStreak((value) => isCorrect ? value + 1 : 0)
+    feedbackTimer.current = setTimeout(() => {
+      setFeedback(null)
+      setGuess(null)
+      setBuffer([])
+      setTestReplayCount(0)
+      if (testIndex + 1 >= testQuestions.length) {
+        const score = answers.filter((item) => item.correct).length
+        const passed = score >= needed(TEST_LENGTH, PASS_RATE)
+        setTestComplete(true)
+        setRoundResult({ correct: score, total: TEST_LENGTH, passed })
+        if (passed) setCompleted((items) => items.includes(lessonId) ? items : [...items, lessonId])
+        setTestWeakCharacters((previous) => {
+          const next = { ...previous }
+          answers.filter((item) => !item.correct).forEach((item) => {
+            next[item.char] = (next[item.char] || 0) + 1
+          })
+          return next
+        })
+      } else {
+        setTestIndex((value) => value + 1)
+      }
+    }, 650)
+  }
+
   const runTest = async () => {
-    if (feedback) return
-    await playPattern(targetPattern)
+    if (feedback || testComplete || !testQuestion || testReplayCount >= TEST_REPLAYS) return
+    setTestReplayCount((value) => value + 1)
+    await playPattern(testTargetPattern)
   }
 
   const handleGuess = (letter) => {
-    if (feedback) return
+    if (feedback || testComplete) return
     setGuess(letter)
-    advance(letter === targetChar)
+    submitTestAnswer(letter)
   }
 
   const changeMode = (m) => {
     if (m === mode) return
     setMode(m)
-    resetRound(m === 'practice' ? practiceChars : lesson.chars)
+    if (m === 'test') startTest(lesson.chars)
+    else resetRound(m === 'practice' ? practiceChars : lesson.chars)
   }
 
   const selectPracticeCategory = (category) => {
@@ -343,8 +440,12 @@ export default function MorseTrainer() {
 
   const selectLesson = (id) => {
     setLessonId(id)
-    resetRound(LESSONS.find((l) => l.id === id).chars)
+    const chars = LESSONS.find((l) => l.id === id).chars
+    if (mode === 'test') startTest(chars)
+    else resetRound(chars)
   }
+
+  const restartTest = () => startTest(lesson.chars)
 
   const clearProgress = () => {
     const ok = window.confirm("Reset all lesson and practice progress? This can't be undone.")
@@ -366,7 +467,7 @@ export default function MorseTrainer() {
   const subtitle = {
     learn: 'See each pattern and hear how it sounds',
     practice: 'Hold the button or spacebar to key',
-    test: 'Listen, then pick the character',
+    test: 'Identify patterns, listen, and send Morse code'
   }[mode]
 
   return (
@@ -492,31 +593,79 @@ export default function MorseTrainer() {
 
           {mode === 'test' && (
             <>
-              <p className="text-sm text-neutral-500 mb-4">Play the sound, then guess</p>
-              <button
-                onClick={runTest}
-                aria-label="Play the character's morse pattern"
-                className="w-24 h-24 rounded-full border-2 border-signal bg-signal/10 flex items-center justify-center mb-6"
-              >
-                <Zap size={28} className="text-signal" />
-              </button>
-              <div className="grid grid-cols-4 gap-2 w-full">
-                {lesson.chars.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => handleGuess(c)}
-                    className={`py-2 rounded-md border text-sm font-medium transition-colors ${
-                      feedback && c === targetChar
-                        ? 'border-green-500 bg-green-500/10'
-                        : feedback === 'wrong' && c === guess
-                        ? 'border-red-500 bg-red-500/10'
-                        : 'border-line hover:border-neutral-600'
-                    }`}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
+              {!testComplete && testQuestion ? (
+                <>
+                  <div className="w-full flex items-center justify-between mb-4">
+                    <span className="text-sm text-neutral-400">Question {testIndex + 1} of {TEST_LENGTH}</span>
+                    <span className="text-xs text-signal uppercase tracking-wide">
+                      {testQuestion.type === 'visual' ? 'Visual recognition' : testQuestion.type === 'recall' ? 'Morse recall' : 'Listening'}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-ink mb-6 overflow-hidden">
+                    <div className="h-full bg-signal transition-all" style={{ width: `${(testIndex / TEST_LENGTH) * 100}%` }} />
+                  </div>
+                  {testQuestion.type === 'visual' && (
+                    <>
+                      <p className="text-sm text-neutral-400 mb-5">Which character matches this Morse pattern?</p>
+                      <div className="min-h-12 flex items-center justify-center mb-6">
+                        <PatternBars pattern={testTargetPattern} />
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full">
+                        {testQuestion.options.map((c) => (
+                          <button key={c} onClick={() => handleGuess(c)} disabled={!!feedback} className="py-3 rounded-md border border-line hover:border-signal text-lg font-medium disabled:opacity-60">{c}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {testQuestion.type === 'listening' && (
+                    <>
+                      <p className="text-sm text-neutral-400 mb-5">Listen carefully. Which character did you hear?</p>
+                      <button onClick={runTest} disabled={!!feedback || testReplayCount >= TEST_REPLAYS} aria-label="Play Morse audio" className="w-24 h-24 rounded-full border-2 border-signal bg-signal/10 flex items-center justify-center mb-3 disabled:opacity-50">
+                        <Zap size={28} className="text-signal" />
+                      </button>
+                      <p className="text-xs text-neutral-500 mb-5">Audio plays used: {testReplayCount}/{TEST_REPLAYS}</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full">
+                        {testQuestion.options.map((c) => (
+                          <button key={c} onClick={() => handleGuess(c)} disabled={!!feedback} className="py-3 rounded-md border border-line hover:border-signal text-lg font-medium disabled:opacity-60">{c}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {testQuestion.type === 'recall' && (
+                    <>
+                      <p className="text-sm text-neutral-400 mb-2">Send the Morse code for this character.</p>
+                      <p className="font-display text-5xl mb-6">{testQuestion.char}</p>
+                      <button
+                        onPointerDown={(e) => { if (e.button !== 0) return; e.currentTarget.setPointerCapture?.(e.pointerId); handleDown() }}
+                        onPointerUp={handleUp}
+                        onPointerCancel={handleUp}
+                        onContextMenu={(e) => e.preventDefault()}
+                        aria-label="Key a dot or dash for the test answer"
+                        className="w-24 h-24 rounded-full border-2 border-signal bg-signal/10 flex items-center justify-center select-none touch-none"
+                      >
+                        <Zap size={28} className="text-signal" />
+                      </button>
+                      <p className="text-xs text-neutral-500 mt-3">Tap for a dot, hold for a dash. Code submits after a short pause.</p>
+                      <div className="flex gap-1 mt-4 h-5">{buffer.map((symbol, i) => <span key={i} className={`bg-signal rounded-sm h-5 ${symbol === '.' ? 'w-2' : 'w-5'}`} />)}</div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <div className="w-full">
+                  <h3 className="text-xl font-semibold text-center mb-2">Assessment complete</h3>
+                  <p className="text-center text-3xl font-semibold mb-1">{testAnswers.filter((item) => item.correct).length}/{TEST_LENGTH}</p>
+                  <p className="text-sm text-center text-neutral-400 mb-5">{roundResult?.passed ? 'Passed — lesson unlocked.' : `You need ${needed(TEST_LENGTH, PASS_RATE)} correct to pass.`}</p>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {testAnswers.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between gap-3 text-sm border-b border-line pb-2">
+                        <span>{i + 1}. {item.char} <span className="text-xs text-neutral-500">({item.type === 'visual' ? 'Visual' : item.type === 'recall' ? 'Recall' : 'Listening'})</span></span>
+                        <span className={item.correct ? 'text-green-400' : 'text-red-400'}>{item.correct ? 'Correct' : `Correct code: ${MORSE[item.char]}`}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={restartTest} className="w-full mt-5 py-3 rounded-lg border border-signal text-signal hover:bg-signal/10">Try another test</button>
+                </div>
+              )}
             </>
           )}
 
@@ -525,11 +674,13 @@ export default function MorseTrainer() {
               <div aria-live="polite" className="mt-4 min-h-[2rem] text-sm flex items-center gap-2">
                 {feedback === 'correct' && <span className="text-green-400">Correct</span>}
                 {feedback === 'wrong' && (
-                  <>
-                    <span className="text-red-400">Not quite, {targetChar} is</span>
-                    <PatternBars pattern={targetPattern} />
-                    <span className="sr-only">{speak(targetPattern)}</span>
-                  </>
+                  mode === 'test'
+                    ? <span className="text-neutral-400">Answer recorded. Keep going.</span>
+                    : <>
+                        <span className="text-red-400">Not quite, {targetChar} is</span>
+                        <PatternBars pattern={targetPattern} />
+                        <span className="sr-only">{speak(targetPattern)}</span>
+                      </>
                 )}
               </div>
               {roundResult && (
@@ -545,9 +696,14 @@ export default function MorseTrainer() {
                     : `You need ${mode === 'practice' ? neededPractice(roundResult.total) : needed(roundResult.total, PASS_RATE)} to pass, go again.`}
                 </p>
               )}
-              <p className="text-xs text-neutral-500 mt-4">
-                Character {index + 1} of {order.length} · Streak: {streak}
-              </p>
+              {mode !== 'test' && <p className="text-xs text-neutral-500 mt-4">Character {index + 1} of {order.length} · Streak: {streak}</p>}
+              {mode === 'test' && !testComplete && <p className="text-xs text-neutral-500 mt-4">Current streak: {streak}</p>}
+              {mode === 'test' && testComplete && Object.keys(testWeakCharacters).length > 0 && (
+                <div className="mt-4 w-full text-left">
+                  <p className="text-xs text-neutral-400 mb-2">Characters to review</p>
+                  <p className="text-xs text-neutral-500">{Object.entries(testWeakCharacters).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([char]) => char).join(' · ')}</p>
+                </div>
+              )}
             </>
           )}
         </div>
