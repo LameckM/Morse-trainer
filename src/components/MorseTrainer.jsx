@@ -15,6 +15,7 @@ const PROGRESS_KEY = 'a4o-morse-progress'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const needed = (total, rate = PASS_RATE) => Math.ceil(rate * total)
+const neededPractice = (total) => Math.floor(PRACTICE_PASS_RATE * total)
 const speak = (pattern) => [...pattern].map((s) => (s === '.' ? 'dot' : 'dash')).join(' ')
 
 function shuffle(items) {
@@ -223,7 +224,8 @@ export default function MorseTrainer() {
         setBuffer([])
         if (index + 1 >= order.length) {
           const passRate = mode === 'practice' ? PRACTICE_PASS_RATE : PASS_RATE
-          const passed = newCorrect >= needed(order.length, passRate)
+          const requiredCorrect = mode === 'practice' ? neededPractice(order.length) : needed(order.length, passRate)
+          const passed = newCorrect >= requiredCorrect
           setRoundResult({ correct: newCorrect, total: order.length, passed })
           if (passed && mode === 'practice' && practiceCategory === 'Letters') {
             setCompletedPracticeLetterSections((sections) =>
@@ -497,7 +499,7 @@ export default function MorseTrainer() {
                   Round done: {roundResult.correct} of {roundResult.total}.{' '}
                   {roundResult.passed
                     ? mode === 'practice' ? 'Practice round completed.' : 'Lesson passed.'
-                    : `You need ${needed(roundResult.total, mode === 'practice' ? PRACTICE_PASS_RATE : PASS_RATE)} to pass, go again.`}
+                    : `You need ${mode === 'practice' ? neededPractice(roundResult.total) : needed(roundResult.total, PASS_RATE)} to pass, go again.`}
                 </p>
               )}
               <p className="text-xs text-neutral-500 mt-4">
