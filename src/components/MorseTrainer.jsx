@@ -120,6 +120,7 @@ export default function MorseTrainer() {
   const [guess, setGuess] = useState(null)
   const [roundResult, setRoundResult] = useState(null)
   const [streak, setStreak] = useState(0)
+  const [learnCategory, setLearnCategory] = useState('All')
 
   const pressStart = useRef(null)
   const gapTimer = useRef(null)
@@ -129,6 +130,10 @@ export default function MorseTrainer() {
   const lesson = LESSONS.find((l) => l.id === lessonId)
   const targetChar = order[index]
   const targetPattern = MORSE[targetChar]
+  const visibleReferenceGroups = learnCategory === 'All'
+    ? REFERENCE_GROUPS
+    : REFERENCE_GROUPS.filter((group) => group.label === learnCategory)
+  const visibleCharacterCount = visibleReferenceGroups.reduce((total, group) => total + group.chars.length, 0)
 
   useEffect(() => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(completed))
@@ -296,20 +301,44 @@ export default function MorseTrainer() {
         <div className="bg-panel border border-line rounded-xl p-8 flex flex-col items-center">
           {mode === 'learn' && (
             <>
-              <p className="text-sm text-neutral-500 mb-6 self-start">
-                Tap any character to hear it. Everything is open here, no unlocking needed.
-              </p>
+              <div className="w-full mb-5">
+                <p className="text-sm text-neutral-500 mb-3">
+                  Explore the complete Morse alphabet. Select any character to hear its code.
+                  Learn mode is always open; lesson progress does not restrict it.
+                </p>
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Filter learning characters">
+                  {['All', 'Letters', 'Numbers', 'Punctuation', 'Symbols'].map((category) => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setLearnCategory(category)}
+                      aria-pressed={learnCategory === category}
+                      className={`text-xs px-3 py-2 rounded-full border transition-colors ${
+                        learnCategory === category
+                          ? 'border-signal bg-signal/10 text-signal'
+                          : 'border-line text-neutral-400 hover:border-neutral-600'
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-neutral-500 mt-3">
+                  {visibleCharacterCount} characters available
+                </p>
+              </div>
               <div className="flex flex-col gap-6 w-full">
-                {REFERENCE_GROUPS.map((group) => (
+                {visibleReferenceGroups.map((group) => (
                   <section key={group.label}>
                     <h3 className="text-xs uppercase tracking-wide text-neutral-500 mb-2">{group.label}</h3>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {group.chars.map((c) => (
                         <button
                           key={c}
+                          type="button"
                           onClick={() => playPattern(MORSE[c])}
                           aria-label={`${c}, ${speak(MORSE[c])}. Play sound`}
-                          className="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-line hover:border-neutral-600 transition-colors"
+                          className="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-line hover:border-signal hover:bg-signal/5 transition-colors"
                         >
                           <span className="font-display text-lg">{c}</span>
                           <PatternBars pattern={MORSE[c]} />
@@ -319,7 +348,9 @@ export default function MorseTrainer() {
                   </section>
                 ))}
               </div>
-              <p className="text-xs text-neutral-500 mt-6 self-start">Got them? Switch to Practice or Test.</p>
+              <p className="text-xs text-neutral-500 mt-6 self-start">
+                Learn at your own pace. Switch to Practice or Test whenever you're ready.
+              </p>
             </>
           )}
 
