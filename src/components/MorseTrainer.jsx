@@ -528,7 +528,7 @@ export default function MorseTrainer() {
                 </button>
                 <div className="flex flex-col gap-2 mt-3">
                   {LESSONS.filter((item) => item.id <= 4).map((section, index) => {
-                    const isLocked = index > 0 && !completedPracticeLetterSections.includes(LESSONS[index].id)
+                    const isLocked = index > 0 && !completedPracticeLetterSections.includes(LESSONS[index - 1].id)
                     const isDone = completedPracticeLetterSections.includes(section.id)
                     const isActive = practiceCategory === 'Letters' && practiceLetterSectionId === section.id
                     return (
