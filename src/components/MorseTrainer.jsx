@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MORSE, LESSONS } from '../data/morseCode.js'
+import { MORSE, LESSONS, REFERENCE_GROUPS } from '../data/morseCode.js'
 import { Check, Lock, Zap, Trash2 } from 'lucide-react'
 
 const DOT_MS = 120
@@ -274,7 +274,7 @@ export default function MorseTrainer() {
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <p className="font-medium">{lesson.label}</p>
+          <p className="font-medium">{mode === 'learn' ? 'All characters' : lesson.label}</p>
           <p className="text-sm text-neutral-400">{subtitle}</p>
         </div>
         <div className="flex gap-1 bg-panel border border-line rounded-lg p-1">
@@ -292,25 +292,34 @@ export default function MorseTrainer() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[1.3fr_1fr] gap-5">
+      <div className={`grid grid-cols-1 gap-5 ${mode === 'learn' ? '' : 'md:grid-cols-[1.3fr_1fr]'}`}>
         <div className="bg-panel border border-line rounded-xl p-8 flex flex-col items-center">
           {mode === 'learn' && (
             <>
-              <p className="text-sm text-neutral-500 mb-4">Tap a character to hear it</p>
-              <div className="grid grid-cols-2 gap-2 w-full">
-                {lesson.chars.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => playPattern(MORSE[c])}
-                    aria-label={`${c}, ${speak(MORSE[c])}. Play sound`}
-                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-line hover:border-neutral-600 transition-colors"
-                  >
-                    <span className="font-display text-lg">{c}</span>
-                    <PatternBars pattern={MORSE[c]} />
-                  </button>
+              <p className="text-sm text-neutral-500 mb-6 self-start">
+                Tap any character to hear it. Everything is open here, no unlocking needed.
+              </p>
+              <div className="flex flex-col gap-6 w-full">
+                {REFERENCE_GROUPS.map((group) => (
+                  <section key={group.label}>
+                    <h3 className="text-xs uppercase tracking-wide text-neutral-500 mb-2">{group.label}</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {group.chars.map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => playPattern(MORSE[c])}
+                          aria-label={`${c}, ${speak(MORSE[c])}. Play sound`}
+                          className="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-line hover:border-neutral-600 transition-colors"
+                        >
+                          <span className="font-display text-lg">{c}</span>
+                          <PatternBars pattern={MORSE[c]} />
+                        </button>
+                      ))}
+                    </div>
+                  </section>
                 ))}
               </div>
-              <p className="text-xs text-neutral-500 mt-6">Got them? Switch to Practice or Test.</p>
+              <p className="text-xs text-neutral-500 mt-6 self-start">Got them? Switch to Practice or Test.</p>
             </>
           )}
 
@@ -418,7 +427,7 @@ export default function MorseTrainer() {
           )}
         </div>
 
-        <div>
+        <div className={mode === 'learn' ? 'hidden' : ''}>
           <p className="text-sm text-neutral-500 mb-1">Lessons</p>
           <p className="text-xs text-neutral-600 mb-3">
             Score {Math.round(PASS_RATE * 100)}% in a round to unlock the next one

@@ -13,6 +13,8 @@ export const MORSE = {
   '@': '.--.-.', '&': '.-...',
 }
 
+// Learn mode shows every group, whether or not its lesson is unlocked.
+// REFERENCE_GROUPS is declared after LESSONS below so it can reuse the same character lists.
 export const LESSONS = [
   { id: 1, label: 'Letters A-D', chars: ['A', 'B', 'C', 'D'] },
   { id: 2, label: 'Letters E-J', chars: ['E', 'F', 'G', 'H', 'I', 'J'] },
@@ -21,4 +23,13 @@ export const LESSONS = [
   { id: 5, label: 'Numbers', chars: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] },
   { id: 6, label: 'Punctuation', chars: ['.', ',', '?', '!', "'", '-'] },
   { id: 7, label: 'Special characters', chars: ['/', '(', ')', ':', ';', '=', '+', '_', '"', '$', '@', '&'] },
+]
+
+const charsOf = (ids) => LESSONS.filter((l) => ids.includes(l.id)).flatMap((l) => l.chars)
+
+export const REFERENCE_GROUPS = [
+  { label: 'Letters', chars: charsOf([1, 2, 3, 4]).sort() },
+  { label: 'Numbers', chars: charsOf([5]) },
+  { label: 'Punctuation', chars: charsOf([6]) },
+  { label: 'Special characters', chars: charsOf([7]) },
 ]

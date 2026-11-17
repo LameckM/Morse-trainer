@@ -6,7 +6,7 @@ A small interactive morse code trainer. Three modes: learn the patterns, practic
 
 ## What it does
 
-Learn mode shows the dot and dash pattern for every character in the lesson. Tap one to hear it.
+Learn mode is a full reference: every letter, number, and symbol with its dot and dash pattern, grouped by type. Tap one to hear it. It's not tied to lesson progress, so nothing in it is locked.
 
 Practice mode reads your actual press timing. Tap for a dot, hold for a dash, using mouse, touch, or the spacebar. It decodes what you sent and checks it against the target character. On a miss it shows the correct pattern before moving on.
 
