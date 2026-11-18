@@ -812,7 +812,7 @@ export default function MorseTrainer() {
                 Choose a lesson to test your Morse-code knowledge. Score {Math.round(PASS_RATE * 100)}% to unlock the next lesson.
               </p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {LESSONS.map((l, idx) => {
                 const isLocked = idx > 0 && !completed.includes(LESSONS[idx - 1].id)
                 const isDone = completed.includes(l.id)
@@ -829,7 +829,7 @@ export default function MorseTrainer() {
                       isActive
                         ? 'border-signal bg-signal/10 shadow-sm'
                         : isLocked
-                        ? 'border-line bg-panel opacity-55 cursor-not-allowed'
+                        ? 'border-line bg-panel/70 cursor-not-allowed'
                         : 'border-line bg-panel hover:border-signal/60 hover:bg-signal/5'
                     }`}
                   >
@@ -845,7 +845,7 @@ export default function MorseTrainer() {
                         <span className="text-xs text-neutral-500">Available</span>
                       )}
                     </div>
-                    <p className={`font-semibold text-sm mb-1 ${isLocked ? 'text-neutral-500' : 'text-neutral-100'}`}>{l.label}</p>
+                    <p className={`font-semibold text-sm mb-1 ${isLocked ? 'text-neutral-300' : 'text-neutral-100'}`}>{l.label}</p>
                     <p className="text-xs text-neutral-500">
                       {l.chars.length} {l.chars.length === 1 ? 'character' : 'characters'} · 15 questions
                     </p>
