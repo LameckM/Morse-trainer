@@ -216,9 +216,10 @@ export default function MorseTrainer() {
     localStorage.setItem(TEST_WEAK_KEY, JSON.stringify(testWeakCharacters))
   }, [testWeakCharacters])
 
-  // Practice mode owns the spacebar. In other modes it keeps its normal job (pressing focused buttons).
+  // Spacebar keys Morse in Practice and during Test recall questions only.
   useEffect(() => {
-    if (mode !== 'practice') return
+    const testRecallActive = mode === 'test' && testQuestion?.type === 'recall' && !testComplete
+    if (mode !== 'practice' && !testRecallActive) return
     const onKeyDown = (e) => {
       if (e.code !== 'Space') return
       e.preventDefault()
