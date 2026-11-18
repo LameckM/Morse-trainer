@@ -1,11 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { MORSE, GROUPS, STAGES, REFERENCE_GROUPS } from '../data/morseCode.js'
 import { shuffle, buildSequence, updateWeak, MAX_WEAK_SCORE } from '../lib/rounds.js'
+import { timing, clampWpm, WPM_MIN, WPM_MAX, WPM_DEFAULT } from '../lib/timing.js'
 import { Check, Lock, Zap, Trash2, Eraser } from 'lucide-react'
 
-const DOT_MS = 120
-const DASH_THRESHOLD_MS = 250
-const GAP_MS = 900
 const RAMP_S = 0.01
 const PASS_RATE = 0.75
 const PRACTICE_PASS_RATE = 0.9
@@ -17,6 +15,7 @@ const PROGRESS_KEY = 'a4o-morse-progress-v2'
 const PRACTICE_PROGRESS_KEY = 'a4o-morse-practice-progress-v2'
 // Per-character trouble scores, shared by Practice and Test. The old key counted test misses forever and never faded.
 const WEAK_KEY = 'a4o-morse-weak-v2'
+const WPM_KEY = 'a4o-morse-wpm-v1' // a setting, not progress, so Reset leaves it alone
 const LEGACY_KEYS = [
   'a4o-morse-test-weak-characters',
   'a4o-morse-progress',
@@ -41,6 +40,15 @@ function loadIds(key) {
     return Array.isArray(saved) ? saved.filter((id) => STAGE_IDS.has(id)) : []
   } catch {
     return []
+  }
+}
+
+function loadWpm() {
+  try {
+    const saved = localStorage.getItem(WPM_KEY)
+    return saved === null ? WPM_DEFAULT : clampWpm(saved)
+  } catch {
+    return WPM_DEFAULT
   }
 }
 
@@ -115,7 +123,9 @@ function PatternBars({ pattern }) {
   )
 }
 
-function useBeep() {
+function useBeep(speed) {
+  const speedRef = useRef(speed)
+  speedRef.current = speed
   const ctxRef = useRef(null)
   const activeRef = useRef(null)
   const playToken = useRef(0)
@@ -170,13 +180,14 @@ function useBeep() {
   // Starting a new pattern cancels the previous one, so double taps restart instead of overlapping.
   const playPattern = async (pattern) => {
     const token = ++playToken.current
+    const { dot, dash, symbolGap } = speedRef.current
     for (const symbol of pattern) {
       if (token !== playToken.current) return
       start()
-      await sleep(symbol === '.' ? DOT_MS : DOT_MS * 3)
+      await sleep(symbol === '.' ? dot : dash)
       if (token !== playToken.current) return
       stop()
-      await sleep(DOT_MS)
+      await sleep(symbolGap)
     }
   }
 
@@ -204,13 +215,15 @@ export default function MorseTrainer() {
   const [testComplete, setTestComplete] = useState(false)
   const [weakCharacters, setWeakCharacters] = useState(loadWeak)
   const [learnCategory, setLearnCategory] = useState('All')
+  const [wpm, setWpm] = useState(loadWpm)
 
   // Mirrors weakCharacters so timeouts that fire after an answer still see the latest scores.
   const weakRef = useRef(weakCharacters)
   const pressStart = useRef(null)
   const gapTimer = useRef(null)
   const feedbackTimer = useRef(null)
-  const { start, stop, playPattern, cancel } = useBeep()
+  const speed = timing(wpm)
+  const { start, stop, playPattern, cancel } = useBeep(speed)
 
   const lesson = STAGES.find((s) => s.id === lessonId)
   const targetChar = order[index]
@@ -231,6 +244,7 @@ export default function MorseTrainer() {
   useEffect(() => saveJson(PROGRESS_KEY, completed), [completed])
   useEffect(() => saveJson(PRACTICE_PROGRESS_KEY, completedPractice), [completedPractice])
   useEffect(() => saveJson(WEAK_KEY, weakCharacters), [weakCharacters])
+  useEffect(() => saveJson(WPM_KEY, wpm), [wpm])
 
   // Spacebar keys Morse in Practice and during Test recall questions only.
   useEffect(() => {
@@ -349,14 +363,14 @@ export default function MorseTrainer() {
     stop()
     const duration = performance.now() - pressStart.current
     pressStart.current = null
-    const symbol = duration < DASH_THRESHOLD_MS ? '.' : '-'
+    const symbol = duration < speed.dashThreshold ? '.' : '-'
     const next = [...buffer, symbol]
     setBuffer(next)
     clearTimeout(gapTimer.current)
     gapTimer.current = setTimeout(() => {
       if (mode === 'test') submitTestAnswer(next.join(''))
       else advance(next.join('') === targetPattern)
-    }, GAP_MS)
+    }, speed.letterGap)
   }
 
   const startTest = (chars) => {
@@ -495,6 +509,25 @@ export default function MorseTrainer() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap mb-6 text-sm">
+        <label htmlFor="wpm" className="text-neutral-400">Speed</label>
+        <input
+          id="wpm"
+          type="range"
+          min={WPM_MIN}
+          max={WPM_MAX}
+          step={1}
+          value={wpm}
+          onChange={(e) => setWpm(clampWpm(e.target.value))}
+          aria-valuetext={`${wpm} words per minute`}
+          className="w-40 accent-signal"
+        />
+        <span className="font-medium tabular-nums w-16">{wpm} WPM</span>
+        <span className="text-xs text-neutral-500">
+          Dot {Math.round(speed.dot)}ms · dash over {Math.round(speed.dashThreshold)}ms when keying
+        </span>
       </div>
 
       <div className={`grid grid-cols-1 gap-5 ${mode === 'learn' ? '' : 'md:grid-cols-[1.3fr_1fr]'}`}>
