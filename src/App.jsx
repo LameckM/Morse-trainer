@@ -4,7 +4,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-line">
-        <div className="max-w-3xl mx-auto px-6 h-16 flex items-center gap-2">
+        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center gap-2">
           {/* <span className="w-7 h-7 rounded-md bg-signal text-ink font-display font-bold text-sm flex items-center justify-center">
             •
           </span> */}
@@ -12,12 +12,12 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 w-full max-w-3xl mx-auto px-6 py-10">
+      <main className="flex-1 w-full max-w-6xl mx-auto px-6 py-10">
         <MorseTrainer />
       </main>
 
       <footer className="border-t border-line">
-        <div className="max-w-3xl mx-auto px-6 py-6 text-xs text-neutral-500">Built by Lameck</div>
+        <div className="max-w-6xl mx-auto px-6 py-6 text-xs text-neutral-500">Built by Lameck</div>
       </footer>
     </div>
   )
