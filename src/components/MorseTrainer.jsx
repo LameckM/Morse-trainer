@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { MORSE, LESSONS, REFERENCE_GROUPS } from '../data/morseCode.js'
+import { MORSE, GROUPS, STAGES, REFERENCE_GROUPS } from '../data/morseCode.js'
+import { shuffle, buildSequence } from '../lib/rounds.js'
 import { Check, Lock, Zap, Trash2 } from 'lucide-react'
 
 const DOT_MS = 120
@@ -8,27 +9,45 @@ const GAP_MS = 900
 const RAMP_S = 0.01
 const PASS_RATE = 0.75
 const PRACTICE_PASS_RATE = 0.9
-const PRACTICE_LETTER_PROGRESS_KEY = 'a4o-morse-practice-letter-progress'
-const PRACTICE_GROUP_PROGRESS_KEY = 'a4o-morse-practice-group-progress'
+const ROUND_LENGTH = 10
 const CORRECT_DELAY_MS = 700
 const WRONG_DELAY_MS = 1500
-const PROGRESS_KEY = 'a4o-morse-progress'
+// v2 keys store stage ids like "letters-1". The old keys used different ids, so they are cleared on reset.
+const PROGRESS_KEY = 'a4o-morse-progress-v2'
+const PRACTICE_PROGRESS_KEY = 'a4o-morse-practice-progress-v2'
 const TEST_WEAK_KEY = 'a4o-morse-test-weak-characters'
+const LEGACY_KEYS = [
+  'a4o-morse-progress',
+  'a4o-morse-practice-letter-progress',
+  'a4o-morse-practice-group-progress',
+]
 const TEST_LENGTH = 15
 const TEST_REPLAYS = 2
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const needed = (total, rate = PASS_RATE) => Math.ceil(rate * total)
-const neededPractice = (total) => Math.floor(PRACTICE_PASS_RATE * total)
+// The epsilon keeps float noise (0.9 * 10 = 9.000000000000002 in some engines) from bumping the pass mark up.
+const needed = (total, rate = PASS_RATE) => Math.ceil(rate * total - 1e-9)
+const roundLength = (chars) => Math.max(ROUND_LENGTH, chars.length)
+const makeRound = (chars) => buildSequence(chars, roundLength(chars))
 const speak = (pattern) => [...pattern].map((s) => (s === '.' ? 'dot' : 'dash')).join(' ')
 
-function shuffle(items) {
-  const arr = [...items]
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+const STAGE_IDS = new Set(STAGES.map((s) => s.id))
+
+function loadIds(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key))
+    return Array.isArray(saved) ? saved.filter((id) => STAGE_IDS.has(id)) : []
+  } catch {
+    return []
   }
-  return arr
+}
+
+function saveJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Storage can be blocked or full (private mode). Progress just won't persist.
+  }
 }
 
 function createTestQuestions(chars) {
@@ -37,8 +56,9 @@ function createTestQuestions(chars) {
     ...Array(5).fill('recall'),
     ...Array(5).fill('listening'),
   ])
-  return types.map((type) => {
-    const char = chars[Math.floor(Math.random() * chars.length)]
+  const sequence = buildSequence(chars, types.length)
+  return types.map((type, i) => {
+    const char = sequence[i]
     const distractors = shuffle(chars.filter((item) => item !== char)).slice(0, 3)
     return {
       type,
@@ -127,16 +147,12 @@ function useBeep() {
 }
 
 export default function MorseTrainer() {
-  const [completed, setCompleted] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || []
-    } catch {
-      return []
-    }
-  })
-  const [lessonId, setLessonId] = useState(LESSONS[0].id)
-  const [mode, setMode] = useState(() => (completed.length ? 'practice' : 'learn'))
-  const [order, setOrder] = useState(() => shuffle(LESSONS[0].chars))
+  const [completed, setCompleted] = useState(() => loadIds(PROGRESS_KEY))
+  const [completedPractice, setCompletedPractice] = useState(() => loadIds(PRACTICE_PROGRESS_KEY))
+  const [lessonId, setLessonId] = useState(STAGES[0].id)
+  const [practiceStageId, setPracticeStageId] = useState(STAGES[0].id)
+  const [mode, setMode] = useState(() => (completed.length || completedPractice.length ? 'practice' : 'learn'))
+  const [order, setOrder] = useState(() => makeRound(STAGES[0].chars))
   const [index, setIndex] = useState(0)
   const [correct, setCorrect] = useState(0)
   const [buffer, setBuffer] = useState([])
@@ -157,64 +173,31 @@ export default function MorseTrainer() {
     }
   })
   const [learnCategory, setLearnCategory] = useState('All')
-  const [practiceCategory, setPracticeCategory] = useState('Letters')
-  const [practiceLetterSectionId, setPracticeLetterSectionId] = useState(1)
-  const [practiceGroupStage, setPracticeGroupStage] = useState(1)
-  const [completedPracticeGroupStages, setCompletedPracticeGroupStages] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(PRACTICE_GROUP_PROGRESS_KEY)) || []
-    } catch {
-      return []
-    }
-  })
-  const [completedPracticeLetterSections, setCompletedPracticeLetterSections] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(PRACTICE_LETTER_PROGRESS_KEY)) || []
-    } catch {
-      return []
-    }
-  })
 
   const pressStart = useRef(null)
   const gapTimer = useRef(null)
   const feedbackTimer = useRef(null)
   const { start, stop, playPattern, cancel } = useBeep()
 
-  const lesson = LESSONS.find((l) => l.id === lessonId)
+  const lesson = STAGES.find((s) => s.id === lessonId)
   const targetChar = order[index]
   const targetPattern = MORSE[targetChar]
   const testQuestion = testQuestions[testIndex]
   const testTargetPattern = testQuestion ? MORSE[testQuestion.char] : ''
-  const practiceGroupLabel = practiceCategory === 'Special characters' ? 'Symbols' : practiceCategory
-  const practiceLetterSection = LESSONS.find((item) => item.id === practiceLetterSectionId)
-  const selectedPracticeGroup = REFERENCE_GROUPS.find((group) => group.label === practiceGroupLabel)
-  const practiceGroupStages = selectedPracticeGroup
-    ? [selectedPracticeGroup.chars.slice(0, selectedPracticeGroup.chars.length / 2), selectedPracticeGroup.chars.slice(selectedPracticeGroup.chars.length / 2)]
-    : []
-  const practiceChars = practiceCategory === 'Letters'
-    ? practiceLetterSection.chars
-    : practiceGroupStages[practiceGroupStage - 1] ?? []
+  const practiceStage = STAGES.find((s) => s.id === practiceStageId)
+  const practiceChars = practiceStage.chars
+  // A practice stage opens once the previous stage of the same group has been passed.
+  const isPracticeLocked = (stage) =>
+    stage.number > 1 && !completedPractice.includes(`${stage.groupId}-${stage.number - 1}`)
   const activeChars = mode === 'practice' ? practiceChars : lesson.chars
   const visibleReferenceGroups = learnCategory === 'All'
     ? REFERENCE_GROUPS
     : REFERENCE_GROUPS.filter((group) => group.label === learnCategory)
   const visibleCharacterCount = visibleReferenceGroups.reduce((total, group) => total + group.chars.length, 0)
 
-  useEffect(() => {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(completed))
-  }, [completed])
-
-  useEffect(() => {
-    localStorage.setItem(PRACTICE_LETTER_PROGRESS_KEY, JSON.stringify(completedPracticeLetterSections))
-  }, [completedPracticeLetterSections])
-
-  useEffect(() => {
-    localStorage.setItem(PRACTICE_GROUP_PROGRESS_KEY, JSON.stringify(completedPracticeGroupStages))
-  }, [completedPracticeGroupStages])
-
-  useEffect(() => {
-    localStorage.setItem(TEST_WEAK_KEY, JSON.stringify(testWeakCharacters))
-  }, [testWeakCharacters])
+  useEffect(() => saveJson(PROGRESS_KEY, completed), [completed])
+  useEffect(() => saveJson(PRACTICE_PROGRESS_KEY, completedPractice), [completedPractice])
+  useEffect(() => saveJson(TEST_WEAK_KEY, testWeakCharacters), [testWeakCharacters])
 
   // Spacebar keys Morse in Practice and during Test recall questions only.
   useEffect(() => {
@@ -257,7 +240,7 @@ export default function MorseTrainer() {
     clearTimers()
     cancel()
     pressStart.current = null
-    setOrder(shuffle(chars))
+    setOrder(makeRound(chars))
     setIndex(0)
     setCorrect(0)
     setBuffer([])
@@ -279,27 +262,12 @@ export default function MorseTrainer() {
         setGuess(null)
         setBuffer([])
         if (index + 1 >= order.length) {
-          const passRate = mode === 'practice' ? PRACTICE_PASS_RATE : PASS_RATE
-          const requiredCorrect = mode === 'practice' ? neededPractice(order.length) : needed(order.length, passRate)
-          const passed = newCorrect >= requiredCorrect
+          const passed = newCorrect >= needed(order.length, PRACTICE_PASS_RATE)
           setRoundResult({ correct: newCorrect, total: order.length, passed })
-          if (passed && mode === 'practice' && practiceCategory === 'Letters') {
-            setCompletedPracticeLetterSections((sections) =>
-              sections.includes(practiceLetterSectionId)
-                ? sections
-                : [...sections, practiceLetterSectionId]
-            )
+          if (passed) {
+            setCompletedPractice((ids) => (ids.includes(practiceStageId) ? ids : [...ids, practiceStageId]))
           }
-          if (passed && mode === 'practice' && practiceCategory !== 'Letters') {
-            const stageKey = `${practiceCategory}-${practiceGroupStage}`
-            setCompletedPracticeGroupStages((stages) =>
-              stages.includes(stageKey) ? stages : [...stages, stageKey]
-            )
-          }
-          if (passed && mode !== 'practice') {
-            setCompleted((c) => (c.includes(lessonId) ? c : [...c, lessonId]))
-          }
-          setOrder(shuffle(activeChars))
+          setOrder(makeRound(activeChars))
           setIndex(0)
           setCorrect(0)
         } else {
@@ -408,40 +376,21 @@ export default function MorseTrainer() {
     else resetRound(m === 'practice' ? practiceChars : lesson.chars)
   }
 
-  const selectPracticeCategory = (category) => {
-    setPracticeCategory(category)
-    if (category === 'Letters') {
-      resetRound(practiceLetterSection.chars)
-      return
-    }
-    setPracticeGroupStage(1)
-    const groupLabel = category === 'Special characters' ? 'Symbols' : category
-    const chars = REFERENCE_GROUPS.find((group) => group.label === groupLabel)?.chars ?? []
-    resetRound(chars.slice(0, chars.length / 2))
+  const selectPracticeStage = (id) => {
+    const stage = STAGES.find((s) => s.id === id)
+    if (!stage || isPracticeLocked(stage)) return
+    setPracticeStageId(id)
+    resetRound(stage.chars)
   }
 
-  const selectPracticeGroupStage = (stage) => {
-    const stageKey = `${practiceCategory}-${stage - 1}`
-    if (stage > 1 && !completedPracticeGroupStages.includes(stageKey)) return
-    setPracticeGroupStage(stage)
-    const groupLabel = practiceCategory === 'Special characters' ? 'Symbols' : practiceCategory
-    const chars = REFERENCE_GROUPS.find((group) => group.label === groupLabel)?.chars ?? []
-    const midpoint = chars.length / 2
-    resetRound(stage === 1 ? chars.slice(0, midpoint) : chars.slice(midpoint))
-  }
-
-  const selectPracticeLetterSection = (id) => {
-    const sectionIndex = LESSONS.findIndex((item) => item.id === id)
-    const isLocked = sectionIndex > 0 && !completedPracticeLetterSections.includes(LESSONS[sectionIndex - 1].id)
-    if (isLocked) return
-    setPracticeCategory('Letters')
-    setPracticeLetterSectionId(id)
-    resetRound(LESSONS.find((item) => item.id === id).chars)
+  const selectPracticeGroup = (groupId) => {
+    if (practiceStage.groupId === groupId) return
+    selectPracticeStage(`${groupId}-1`)
   }
 
   const selectLesson = (id) => {
     setLessonId(id)
-    const chars = LESSONS.find((l) => l.id === id).chars
+    const chars = STAGES.find((s) => s.id === id).chars
     if (mode === 'test') startTest(chars)
     else resetRound(chars)
   }
@@ -451,17 +400,20 @@ export default function MorseTrainer() {
   const clearProgress = () => {
     const ok = window.confirm("Reset all lesson and practice progress? This can't be undone.")
     if (!ok) return
-    localStorage.removeItem(PROGRESS_KEY)
-    localStorage.removeItem(PRACTICE_LETTER_PROGRESS_KEY)
-    localStorage.removeItem(PRACTICE_GROUP_PROGRESS_KEY)
+    ;[PROGRESS_KEY, PRACTICE_PROGRESS_KEY, TEST_WEAK_KEY, ...LEGACY_KEYS].forEach((key) => {
+      try {
+        localStorage.removeItem(key)
+      } catch {
+        // ignore blocked storage
+      }
+    })
     setCompleted([])
-    setCompletedPracticeLetterSections([])
-    setCompletedPracticeGroupStages([])
-    setLessonId(LESSONS[0].id)
-    setPracticeLetterSectionId(1)
-    setPracticeGroupStage(1)
-    setPracticeCategory('Letters')
-    resetRound(LESSONS[0].chars)
+    setCompletedPractice([])
+    setTestWeakCharacters({})
+    setLessonId(STAGES[0].id)
+    setPracticeStageId(STAGES[0].id)
+    if (mode === 'test') startTest(STAGES[0].chars)
+    else resetRound(STAGES[0].chars)
     setStreak(0)
   }
 
@@ -475,7 +427,7 @@ export default function MorseTrainer() {
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <p className="font-medium">{mode === 'learn' ? 'All characters' : mode === 'practice' ? `Practice: ${practiceCategory}` : lesson.label}</p>
+          <p className="font-medium">{mode === 'learn' ? 'All characters' : mode === 'practice' ? `Practice: ${practiceStage.label}` : lesson.label}</p>
           <p className="text-sm text-neutral-400">{subtitle}</p>
         </div>
         <div className="flex gap-1 bg-panel border border-line rounded-lg p-1">
@@ -693,8 +645,8 @@ export default function MorseTrainer() {
                 >
                   Round done: {roundResult.correct} of {roundResult.total}.{' '}
                   {roundResult.passed
-                    ? mode === 'practice' ? 'Practice round completed.' : 'Lesson passed.'
-                    : `You need ${mode === 'practice' ? neededPractice(roundResult.total) : needed(roundResult.total, PASS_RATE)} to pass, go again.`}
+                    ? 'Stage passed.'
+                    : `You need ${needed(roundResult.total, PRACTICE_PASS_RATE)} to pass, go again.`}
                 </p>
               )}
               {mode !== 'test' && <p className="text-xs text-neutral-500 mt-4">Character {index + 1} of {order.length} · Streak: {streak}</p>}
@@ -713,82 +665,52 @@ export default function MorseTrainer() {
           <div>
             <p className="text-sm text-neutral-500 mb-1">Choose a practice group</p>
             <p className="text-xs text-neutral-600 mb-3">
-              Practice one type of Morse code at a time. Each round uses only the selected group.
+              Practice one type of Morse code at a time. Each round uses only the selected stage.
             </p>
             <div className="flex flex-col gap-2">
-              {[
-                { label: 'Letters', count: 'A–Z · 4 sections' },
-                { label: 'Numbers', group: 'Numbers' },
-                { label: 'Punctuation', group: 'Punctuation' },
-                { label: 'Special characters', group: 'Symbols' },
-              ].map(({ label, group, count }) => {
-                const isActive = practiceCategory === label
-                const chars = REFERENCE_GROUPS.find((item) => item.label === group)?.chars ?? []
-                const stageCount = label === 'Letters' ? 4 : 2
+              {GROUPS.map((group) => {
+                const isActive = practiceStage.groupId === group.id
+                const groupStages = STAGES.filter((s) => s.groupId === group.id)
+                const charCount = groupStages.reduce((n, s) => n + s.chars.length, 0)
                 return (
-                  <div key={label} className={`rounded-lg border p-3 ${isActive ? 'border-signal bg-signal/5' : 'border-line'}`}>
+                  <div key={group.id} className={`rounded-lg border p-3 ${isActive ? 'border-signal bg-signal/5' : 'border-line'}`}>
                     <button
                       type="button"
-                      onClick={() => selectPracticeCategory(label)}
+                      onClick={() => selectPracticeGroup(group.id)}
                       aria-pressed={isActive}
                       className="w-full flex items-center justify-between gap-3 text-sm text-left"
                     >
-                      <span className="font-medium">{label}</span>
-                      <span className="text-xs text-neutral-500">{count ?? `${chars.length} characters · 2 stages`}</span>
+                      <span className="font-medium">{group.label}</span>
+                      <span className="text-xs text-neutral-500">{charCount} characters · {groupStages.length} stages</span>
                     </button>
                     {isActive && (
                       <div className="flex flex-col gap-2 mt-3">
-                        {label === 'Letters'
-                          ? LESSONS.filter((item) => item.id <= 4).map((section, index) => {
-                              const isLocked = index > 0 && !completedPracticeLetterSections.includes(LESSONS[index - 1].id)
-                              const isDone = completedPracticeLetterSections.includes(section.id)
-                              const isSelected = practiceLetterSectionId === section.id
-                              return (
-                                <button
-                                  key={section.id}
-                                  type="button"
-                                  disabled={isLocked}
-                                  onClick={() => selectPracticeLetterSection(section.id)}
-                                  aria-pressed={isSelected}
-                                  className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs text-left ${
-                                    isSelected ? 'border-signal text-signal' : 'border-line'
-                                  } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
-                                >
-                                  <span className="flex items-center gap-2">
-                                    {isDone ? <Check size={13} className="text-green-400" /> : isLocked ? <Lock size={13} /> : null}
-                                    {section.label}
-                                  </span>
-                                  <span className="text-neutral-500">{isDone ? 'Completed' : isLocked ? 'Locked' : '90% to unlock next'}</span>
-                                </button>
-                              )
-                            })
-                          : Array.from({ length: stageCount }, (_, index) => {
-                              const stage = index + 1
-                              const stageKey = `${label}-${stage}`
-                              const isLocked = stage > 1 && !completedPracticeGroupStages.includes(`${label}-1`)
-                              const isDone = completedPracticeGroupStages.includes(stageKey)
-                              const isSelected = practiceGroupStage === stage
-                              const half = chars.length / 2
-                              const stageChars = stage === 1 ? chars.slice(0, half) : chars.slice(half)
-                              return (
-                                <button
-                                  key={stage}
-                                  type="button"
-                                  disabled={isLocked}
-                                  onClick={() => selectPracticeGroupStage(stage)}
-                                  aria-pressed={isSelected}
-                                  className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs text-left ${
-                                    isSelected ? 'border-signal text-signal' : 'border-line'
-                                  } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
-                                >
-                                  <span className="flex items-center gap-2">
-                                    {isDone ? <Check size={13} className="text-green-400" /> : isLocked ? <Lock size={13} /> : null}
-                                    {label} {stage} · {stageChars.join(' ')}
-                                  </span>
-                                  <span className="text-neutral-500">{isDone ? 'Completed' : isLocked ? 'Locked' : '90% to unlock next'}</span>
-                                </button>
-                              )
-                            })}
+                        {groupStages.map((stage) => {
+                          const isLocked = isPracticeLocked(stage)
+                          const isDone = completedPractice.includes(stage.id)
+                          const isSelected = practiceStageId === stage.id
+                          const total = roundLength(stage.chars)
+                          return (
+                            <button
+                              key={stage.id}
+                              type="button"
+                              disabled={isLocked}
+                              onClick={() => selectPracticeStage(stage.id)}
+                              aria-pressed={isSelected}
+                              className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs text-left ${
+                                isSelected ? 'border-signal text-signal' : 'border-line'
+                              } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-neutral-600'}`}
+                            >
+                              <span className="flex items-center gap-2">
+                                {isDone ? <Check size={13} className="text-green-400" /> : isLocked ? <Lock size={13} /> : null}
+                                {stage.part} · {stage.chars.join(' ')}
+                              </span>
+                              <span className="text-neutral-500">
+                                {isDone ? 'Completed' : isLocked ? 'Locked' : `Pass: ${needed(total, PRACTICE_PASS_RATE)}/${total}`}
+                              </span>
+                            </button>
+                          )
+                        })}
                       </div>
                     )}
                   </div>
@@ -796,7 +718,7 @@ export default function MorseTrainer() {
               })}
             </div>
             <p className="text-xs text-neutral-500 mt-4">
-              Score at least 90% in each stage to unlock the next stage. Each category keeps its own progress.
+              Each round is {ROUND_LENGTH} prompts or one per character, whichever is more. Score {Math.round(PRACTICE_PASS_RATE * 100)}% to unlock the next stage in the group.
             </p>
             <button
               onClick={clearProgress}
@@ -814,8 +736,8 @@ export default function MorseTrainer() {
               </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {LESSONS.map((l, idx) => {
-                const isLocked = idx > 0 && !completed.includes(LESSONS[idx - 1].id)
+              {STAGES.map((l, idx) => {
+                const isLocked = idx > 0 && !completed.includes(STAGES[idx - 1].id)
                 const isDone = completed.includes(l.id)
                 const isActive = l.id === lessonId
                 const status = isDone ? 'Passed' : isLocked ? 'Locked' : isActive ? 'Ready to test' : 'Available'
@@ -848,7 +770,7 @@ export default function MorseTrainer() {
                     </div>
                     <p className={`font-semibold text-sm mb-1 ${isLocked ? 'text-neutral-300' : 'text-neutral-100'}`}>{l.label}</p>
                     <p className="text-xs text-neutral-500">
-                      {l.chars.length} {l.chars.length === 1 ? 'character' : 'characters'} · 15 questions
+                      {l.chars.join(' ')} · {TEST_LENGTH} questions
                     </p>
                     <div className="mt-4 pt-3 border-t border-line flex items-center justify-between">
                       <span className="text-xs text-neutral-500">{isDone ? 'Assessment passed' : isLocked ? 'Pass previous lesson first' : 'Mixed assessment'}</span>

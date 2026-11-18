@@ -10,9 +10,9 @@ Learn mode is a full reference: every letter, number, and symbol with its dot an
 
 Practice mode reads your actual press timing. Tap for a dot, hold for a dash, using mouse, touch, or the spacebar. It decodes what you sent and checks it against the target character. On a miss it shows the correct pattern before moving on.
 
-Test mode plays the real morse audio for a character through the Web Audio API, then you pick the character from a multiple-choice grid.
+Test mode is a 15 question mixed assessment: five visual questions (match a pattern to a character), five recall questions (key the code for a character yourself) and five listening questions (the real morse audio plays through the Web Audio API, then you pick the character). Listening questions allow two replays, and the results screen lists the correct code for every miss.
 
-There are seven lessons: A-D, E-J, K-P, Q-Z, numbers, punctuation, and special characters, covering the full standard morse alphabet. Each round shuffles the lesson's characters, and you need to get 75% of them right to pass and unlock the next lesson. Progress is saved in localStorage so it's still there next time you open the page. Streak resets on a miss, standard drill-app behavior. There's a clear progress button under the lesson list if you want to wipe saved progress and start over, it asks for confirmation before it clears anything.
+Every character lives in one of four groups: Letters, Numbers, Punctuation and Symbols. Each group is split into stages (Letters has four, the others two each), and the same ten stages drive both Practice and Test. A Practice round is 10 prompts (or one per character if a stage is bigger), dealt evenly so no character repeats back to back. You need 9 of 10 to pass and unlock the next stage in that group. A Test is 15 mixed questions and needs 12 to pass; passing unlocks the next lesson in order. Progress is saved in localStorage so it's still there next time you open the page. Streak resets on a miss, standard drill-app behavior. There's a reset button on the Practice and Test screens if you want to wipe saved progress and start over, it asks for confirmation before it clears anything.
 
 ## Stack
 
@@ -41,14 +41,15 @@ This outputs a static site to `dist/`. It'll run on any static host, no server n
 src/
   App.jsx                      header, layout, mounts the trainer
   components/MorseTrainer.jsx  all trainer logic and UI
-  data/morseCode.js            the morse alphabet and lesson groupings
+  data/morseCode.js            the morse alphabet and the group/stage definitions
+  lib/rounds.js                shuffle and fair prompt sequencing
   index.css                    Tailwind, brand theme, animations
 tailwind.config.js              brand tokens: ink (bg), panel (card), line (border), signal (accent)
 ```
 
-## Adding more lessons
+## Adding more characters or stages
 
-Edit `src/data/morseCode.js`. Each lesson is just an id, a label, and a list of characters pulled from the `MORSE` dictionary above it. Add a new entry to the `LESSONS` array and it shows up in the sidebar automatically, locked behind whichever lesson comes before it.
+Edit `GROUPS` in `src/data/morseCode.js`. Each group has an id, a label and a list of stages, and each stage is a `part` name plus a list of characters pulled from the `MORSE` dictionary above it. Learn, Practice and Test all read from that one list, so a new stage shows up everywhere, locked behind whichever stage comes before it. Saved progress is keyed by stage id (like `letters-1`), so keep ids stable once people have progress.
 
 ## Known limitations
 
