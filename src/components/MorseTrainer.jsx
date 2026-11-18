@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { MORSE, GROUPS, STAGES, REFERENCE_GROUPS } from '../data/morseCode.js'
-import { shuffle, buildSequence } from '../lib/rounds.js'
-import { Check, Lock, Zap, Trash2 } from 'lucide-react'
+import { shuffle, buildSequence, updateWeak, MAX_WEAK_SCORE } from '../lib/rounds.js'
+import { Check, Lock, Zap, Trash2, Eraser } from 'lucide-react'
 
 const DOT_MS = 120
 const DASH_THRESHOLD_MS = 250
@@ -15,8 +15,10 @@ const WRONG_DELAY_MS = 1500
 // v2 keys store stage ids like "letters-1". The old keys used different ids, so they are cleared on reset.
 const PROGRESS_KEY = 'a4o-morse-progress-v2'
 const PRACTICE_PROGRESS_KEY = 'a4o-morse-practice-progress-v2'
-const TEST_WEAK_KEY = 'a4o-morse-test-weak-characters'
+// Per-character trouble scores, shared by Practice and Test. The old key counted test misses forever and never faded.
+const WEAK_KEY = 'a4o-morse-weak-v2'
 const LEGACY_KEYS = [
+  'a4o-morse-test-weak-characters',
   'a4o-morse-progress',
   'a4o-morse-practice-letter-progress',
   'a4o-morse-practice-group-progress',
@@ -28,7 +30,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // The epsilon keeps float noise (0.9 * 10 = 9.000000000000002 in some engines) from bumping the pass mark up.
 const needed = (total, rate = PASS_RATE) => Math.ceil(rate * total - 1e-9)
 const roundLength = (chars) => Math.max(ROUND_LENGTH, chars.length)
-const makeRound = (chars) => buildSequence(chars, roundLength(chars))
+const makeRound = (chars, weak) => buildSequence(chars, roundLength(chars), weak)
 const speak = (pattern) => [...pattern].map((s) => (s === '.' ? 'dot' : 'dash')).join(' ')
 
 const STAGE_IDS = new Set(STAGES.map((s) => s.id))
@@ -42,6 +44,20 @@ function loadIds(key) {
   }
 }
 
+function loadWeak() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WEAK_KEY))
+    if (!saved || typeof saved !== 'object') return {}
+    return Object.fromEntries(
+      Object.entries(saved).filter(
+        ([char, score]) => char in MORSE && Number.isFinite(score) && score > 0 && score <= MAX_WEAK_SCORE
+      )
+    )
+  } catch {
+    return {}
+  }
+}
+
 function saveJson(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value))
@@ -50,13 +66,34 @@ function saveJson(key, value) {
   }
 }
 
-function createTestQuestions(chars) {
+function BufferRow({ buffer, onClear, disabled }) {
+  return (
+    <div className="flex flex-col items-center gap-2 mt-4">
+      <div className="flex gap-1 h-5" role="img" aria-label={buffer.length ? `Keyed so far: ${speak(buffer.join(''))}` : undefined}>
+        {buffer.map((s, i) => (
+          <span key={i} className={`bg-signal rounded-sm h-5 ${s === '.' ? 'w-2' : 'w-5'}`} />
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onClear}
+        disabled={disabled || buffer.length === 0}
+        title="Backspace"
+        className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-200 transition-colors disabled:opacity-30 disabled:hover:text-neutral-500"
+      >
+        <Eraser size={13} /> Clear
+      </button>
+    </div>
+  )
+}
+
+function createTestQuestions(chars, weak) {
   const types = shuffle([
     ...Array(5).fill('visual'),
     ...Array(5).fill('recall'),
     ...Array(5).fill('listening'),
   ])
-  const sequence = buildSequence(chars, types.length)
+  const sequence = buildSequence(chars, types.length, weak)
   return types.map((type, i) => {
     const char = sequence[i]
     const distractors = shuffle(chars.filter((item) => item !== char)).slice(0, 3)
@@ -152,7 +189,7 @@ export default function MorseTrainer() {
   const [lessonId, setLessonId] = useState(STAGES[0].id)
   const [practiceStageId, setPracticeStageId] = useState(STAGES[0].id)
   const [mode, setMode] = useState(() => (completed.length || completedPractice.length ? 'practice' : 'learn'))
-  const [order, setOrder] = useState(() => makeRound(STAGES[0].chars))
+  const [order, setOrder] = useState(() => makeRound(STAGES[0].chars, loadWeak()))
   const [index, setIndex] = useState(0)
   const [correct, setCorrect] = useState(0)
   const [buffer, setBuffer] = useState([])
@@ -165,15 +202,11 @@ export default function MorseTrainer() {
   const [testAnswers, setTestAnswers] = useState([])
   const [testReplayCount, setTestReplayCount] = useState(0)
   const [testComplete, setTestComplete] = useState(false)
-  const [testWeakCharacters, setTestWeakCharacters] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(TEST_WEAK_KEY)) || {}
-    } catch {
-      return {}
-    }
-  })
+  const [weakCharacters, setWeakCharacters] = useState(loadWeak)
   const [learnCategory, setLearnCategory] = useState('All')
 
+  // Mirrors weakCharacters so timeouts that fire after an answer still see the latest scores.
+  const weakRef = useRef(weakCharacters)
   const pressStart = useRef(null)
   const gapTimer = useRef(null)
   const feedbackTimer = useRef(null)
@@ -197,13 +230,18 @@ export default function MorseTrainer() {
 
   useEffect(() => saveJson(PROGRESS_KEY, completed), [completed])
   useEffect(() => saveJson(PRACTICE_PROGRESS_KEY, completedPractice), [completedPractice])
-  useEffect(() => saveJson(TEST_WEAK_KEY, testWeakCharacters), [testWeakCharacters])
+  useEffect(() => saveJson(WEAK_KEY, weakCharacters), [weakCharacters])
 
   // Spacebar keys Morse in Practice and during Test recall questions only.
   useEffect(() => {
     const testRecallActive = mode === 'test' && testQuestion?.type === 'recall' && !testComplete
     if (mode !== 'practice' && !testRecallActive) return
     const onKeyDown = (e) => {
+      if (e.code === 'Backspace') {
+        e.preventDefault()
+        clearInput()
+        return
+      }
       if (e.code !== 'Space') return
       e.preventDefault()
       if (!e.repeat) handleDown()
@@ -235,12 +273,30 @@ export default function MorseTrainer() {
     feedbackTimer.current = null
   }
 
+  const recordResult = (char, wasCorrect) => {
+    const next = updateWeak(weakRef.current, char, wasCorrect)
+    weakRef.current = next
+    setWeakCharacters(next)
+  }
+
+  // Wipes a half-keyed answer so one stray tap doesn't cost a whole prompt.
+  const clearInput = () => {
+    if (feedback) return
+    clearTimeout(gapTimer.current)
+    gapTimer.current = null
+    if (pressStart.current !== null) {
+      pressStart.current = null
+      stop()
+    }
+    setBuffer([])
+  }
+
   // Throws away anything in flight (timers, sounds, half-sent letters) and starts a fresh shuffled round.
   const resetRound = (chars) => {
     clearTimers()
     cancel()
     pressStart.current = null
-    setOrder(makeRound(chars))
+    setOrder(makeRound(chars, weakRef.current))
     setIndex(0)
     setCorrect(0)
     setBuffer([])
@@ -253,6 +309,7 @@ export default function MorseTrainer() {
     if (index === 0) setRoundResult(null)
     setFeedback(wasCorrect ? 'correct' : 'wrong')
     setStreak((s) => (wasCorrect ? s + 1 : 0))
+    recordResult(targetChar, wasCorrect)
     const newCorrect = correct + (wasCorrect ? 1 : 0)
     setCorrect(newCorrect)
 
@@ -267,7 +324,7 @@ export default function MorseTrainer() {
           if (passed) {
             setCompletedPractice((ids) => (ids.includes(practiceStageId) ? ids : [...ids, practiceStageId]))
           }
-          setOrder(makeRound(activeChars))
+          setOrder(makeRound(activeChars, weakRef.current))
           setIndex(0)
           setCorrect(0)
         } else {
@@ -305,7 +362,7 @@ export default function MorseTrainer() {
   const startTest = (chars) => {
     clearTimers()
     cancel()
-    const questions = createTestQuestions(chars)
+    const questions = createTestQuestions(chars, weakRef.current)
     setTestQuestions(questions)
     setTestIndex(0)
     setTestAnswers([])
@@ -331,6 +388,7 @@ export default function MorseTrainer() {
     }
     const answers = [...testAnswers, record]
     setTestAnswers(answers)
+    recordResult(testQuestion.char, isCorrect)
     setFeedback(isCorrect ? 'correct' : 'wrong')
     setStreak((value) => isCorrect ? value + 1 : 0)
     feedbackTimer.current = setTimeout(() => {
@@ -344,13 +402,6 @@ export default function MorseTrainer() {
         setTestComplete(true)
         setRoundResult({ correct: score, total: TEST_LENGTH, passed })
         if (passed) setCompleted((items) => items.includes(lessonId) ? items : [...items, lessonId])
-        setTestWeakCharacters((previous) => {
-          const next = { ...previous }
-          answers.filter((item) => !item.correct).forEach((item) => {
-            next[item.char] = (next[item.char] || 0) + 1
-          })
-          return next
-        })
       } else {
         setTestIndex((value) => value + 1)
       }
@@ -400,7 +451,7 @@ export default function MorseTrainer() {
   const clearProgress = () => {
     const ok = window.confirm("Reset all lesson and practice progress? This can't be undone.")
     if (!ok) return
-    ;[PROGRESS_KEY, PRACTICE_PROGRESS_KEY, TEST_WEAK_KEY, ...LEGACY_KEYS].forEach((key) => {
+    ;[PROGRESS_KEY, PRACTICE_PROGRESS_KEY, WEAK_KEY, ...LEGACY_KEYS].forEach((key) => {
       try {
         localStorage.removeItem(key)
       } catch {
@@ -409,7 +460,8 @@ export default function MorseTrainer() {
     })
     setCompleted([])
     setCompletedPractice([])
-    setTestWeakCharacters({})
+    weakRef.current = {}
+    setWeakCharacters({})
     setLessonId(STAGES[0].id)
     setPracticeStageId(STAGES[0].id)
     if (mode === 'test') startTest(STAGES[0].chars)
@@ -535,12 +587,8 @@ export default function MorseTrainer() {
                   }
                 />
               </button>
-              <p className="text-xs text-neutral-500 mt-4">Tap for a dot, hold for a dash</p>
-              <div className="flex gap-1 mt-4 h-5">
-                {buffer.map((s, i) => (
-                  <span key={i} className={`bg-signal rounded-sm h-5 ${s === '.' ? 'w-2' : 'w-5'}`} />
-                ))}
-              </div>
+              <p className="text-xs text-neutral-500 mt-4">Tap for a dot, hold for a dash. Backspace clears.</p>
+              <BufferRow buffer={buffer} onClear={clearInput} disabled={!!feedback} />
             </>
           )}
 
@@ -598,8 +646,8 @@ export default function MorseTrainer() {
                       >
                         <Zap size={28} className="text-signal" />
                       </button>
-                      <p className="text-xs text-neutral-500 mt-3">Tap for a dot, hold for a dash. Code submits after a short pause.</p>
-                      <div className="flex gap-1 mt-4 h-5">{buffer.map((symbol, i) => <span key={i} className={`bg-signal rounded-sm h-5 ${symbol === '.' ? 'w-2' : 'w-5'}`} />)}</div>
+                      <p className="text-xs text-neutral-500 mt-3">Tap for a dot, hold for a dash. Code submits after a short pause, Backspace clears.</p>
+                      <BufferRow buffer={buffer} onClear={clearInput} disabled={!!feedback} />
                     </>
                   )}
                 </>
@@ -651,10 +699,10 @@ export default function MorseTrainer() {
               )}
               {mode !== 'test' && <p className="text-xs text-neutral-500 mt-4">Character {index + 1} of {order.length} · Streak: {streak}</p>}
               {mode === 'test' && !testComplete && <p className="text-xs text-neutral-500 mt-4">Current streak: {streak}</p>}
-              {mode === 'test' && testComplete && Object.keys(testWeakCharacters).length > 0 && (
+              {mode === 'test' && testComplete && Object.keys(weakCharacters).length > 0 && (
                 <div className="mt-4 w-full text-left">
                   <p className="text-xs text-neutral-400 mb-2">Characters to review</p>
-                  <p className="text-xs text-neutral-500">{Object.entries(testWeakCharacters).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([char]) => char).join(' · ')}</p>
+                  <p className="text-xs text-neutral-500">{Object.entries(weakCharacters).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([char]) => char).join(' · ')}</p>
                 </div>
               )}
             </>
@@ -720,6 +768,12 @@ export default function MorseTrainer() {
             <p className="text-xs text-neutral-500 mt-4">
               Each round is {ROUND_LENGTH} prompts or one per character, whichever is more. Score {Math.round(PRACTICE_PASS_RATE * 100)}% to unlock the next stage in the group.
             </p>
+            {Object.keys(weakCharacters).length > 0 && (
+              <p className="text-xs text-neutral-400 mt-3">
+                Needs work: {Object.entries(weakCharacters).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([char]) => char).join(' · ')}.
+                {' '}These come up more often in your rounds until you get them right.
+              </p>
+            )}
             <button
               onClick={clearProgress}
               className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors mt-4"
