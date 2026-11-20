@@ -127,62 +127,69 @@ function PatternBars({ pattern }) {
 // While audio plays, activeIndex is the signal being sounded (-1 when idle) and the rest light up as they go.
 function PatternViewer({ char, activeIndex, onPlay }) {
   const pattern = MORSE[char]
-  const phrase = MNEMONICS[char]
+  const phrase = MNEMONICS[char] || []
   const symbols = [...pattern]
-  const hasPhrase = phrase && phrase.length === symbols.length
+  const hasPhrase = phrase.length === symbols.length
   const playing = activeIndex >= 0
 
   return (
     <aside
-      aria-label={`${char} in Morse code`}
-      className="order-first lg:order-none self-start sticky top-3 lg:top-6 z-10 bg-panel border border-line rounded-xl p-4 lg:p-6 shadow-lg shadow-black/40 lg:shadow-none"
+      aria-label={`${char} mnemonic and Morse code`}
+      className="order-last lg:order-none self-start lg:sticky lg:top-6 bg-panel border border-line rounded-xl p-4 lg:p-5"
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-baseline gap-3">
-          <span className="font-display text-4xl lg:text-5xl leading-none">{char}</span>
-          <span className="text-xs text-neutral-500">{hasPhrase ? 'Memory phrase' : 'Pattern'}</span>
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="font-display text-4xl leading-none text-neutral-100">{char}</span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-neutral-100">Remember the rhythm</p>
+            <p className="text-xs text-neutral-500">Lowercase = dot · CAPS = dash</p>
+          </div>
         </div>
         <button
           type="button"
           onClick={onPlay}
           aria-label={`Play ${char}`}
-          className="flex items-center gap-2 text-xs px-3 py-2 rounded-md border border-signal text-signal hover:bg-signal/10 transition-colors"
+          className="shrink-0 inline-flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-signal/60 text-signal hover:bg-signal/10 transition-colors"
         >
           <Zap size={13} /> Play
         </button>
       </div>
 
-      <ol aria-label={`${char}: ${speak(pattern)}`} className="flex flex-wrap items-start gap-x-3 gap-y-4 mt-4 lg:mt-6">
-        {symbols.map((s, i) => {
-          const lit = !playing || i <= activeIndex
-          const current = playing && i === activeIndex
-          const label = hasPhrase ? phrase[i] : s === '.' ? 'dot' : 'dash'
-          return (
-            <li key={i} className="flex flex-col items-center gap-2 min-w-[2rem]">
-              <span
-                aria-hidden="true"
-                className={`block h-3 lg:h-4 rounded-sm transition-all duration-150 motion-reduce:transition-none ${
-                  s === '.' ? 'w-3 lg:w-4' : 'w-8 lg:w-12'
-                } ${lit ? 'bg-signal' : 'bg-signal/25'} ${current ? 'scale-110' : ''}`}
-              />
-              <span
-                className={`text-[11px] lg:text-xs leading-none transition-opacity motion-reduce:transition-none ${
-                  hasPhrase && s === '-' ? 'font-semibold text-neutral-100' : hasPhrase ? 'text-neutral-400' : 'text-neutral-500'
-                } ${lit ? '' : 'opacity-40'}`}
-              >
-                <span className="sr-only">{s === '.' ? 'dot: ' : 'dash: '}</span>
-                {label}
-              </span>
-            </li>
-          )
-        })}
-      </ol>
-
-      {hasPhrase && (
-        <p className="hidden lg:block text-xs text-neutral-500 mt-5">
-          Say it out loud: CAPS syllables are dashes, quiet ones are dots.
-        </p>
+      {hasPhrase ? (
+        <ol aria-label={`${char}: ${speak(pattern)}`} className="grid grid-flow-col auto-cols-fr gap-2 mt-4">
+          {symbols.map((symbol, i) => {
+            const lit = !playing || i <= activeIndex
+            const current = playing && i === activeIndex
+            const isDash = symbol === '-'
+            return (
+              <li key={i} className={`min-w-0 rounded-lg border p-2 text-center transition-colors ${
+                current ? 'border-signal bg-signal/10' : 'border-line bg-ink/30'
+              } ${lit ? '' : 'opacity-40'}`}>
+                <span className="block text-xs text-neutral-500 truncate mb-2">{phrase[i]}</span>
+                <span
+                  aria-label={isDash ? 'dash' : 'dot'}
+                  className={`mx-auto block bg-signal transition-all duration-150 motion-reduce:transition-none ${
+                    isDash ? 'w-8 h-2 rounded-sm' : 'w-2 h-2 rounded-full'
+                  } ${current ? 'scale-125' : ''}`}
+                />
+                <span className="block text-[10px] uppercase tracking-wider text-neutral-600 mt-2">
+                  {isDash ? 'Dash' : 'Dot'}
+                </span>
+              </li>
+            )
+          })}
+        </ol>
+      ) : (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-line bg-ink/30 p-3">
+          <PatternBars pattern={pattern} />
+          <span className="text-xs text-neutral-500">No mnemonic phrase for this character</span>
+        </div>
       )}
+
+      <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-line">
+        <span className="text-xs text-neutral-500">Morse pattern</span>
+        <span className="font-mono text-sm tracking-[0.2em] text-signal">{pattern}</span>
+      </div>
     </aside>
   )
 }
