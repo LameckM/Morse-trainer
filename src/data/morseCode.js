@@ -65,6 +65,38 @@ export const STAGES = GROUPS.flatMap((group) =>
   }))
 )
 
+// Memory phrases for the letters, one syllable per signal.
+// CAPS = stressed syllable = dash, lowercase = quick syllable = dot.
+// Say the phrase out loud and the rhythm of the stress spells the letter.
+export const MNEMONICS = {
+  A: ['a', 'PART'],
+  B: ['BOB', 'is', 'the', 'man'],
+  C: ['CO', 'ca', 'CO', 'la'],
+  D: ['DOG', 'did', 'it'],
+  E: ['eh?'],
+  F: ['fetch', 'a', 'FIRE', 'man'],
+  G: ['GOOD', 'GRAV', 'y'],
+  H: ['hip', 'i', 'ty', 'hop'],
+  I: ['i', 'bid'],
+  J: ['in', 'JAWS', 'JAWS', 'JAWS'],
+  K: ['KANG', 'a', 'ROO'],
+  L: ['los', 'AN', 'ge', 'les'],
+  M: ['MMMM', 'MMMM'],
+  N: ['NU', 'dist'],
+  O: ['OH', 'MY', 'GOD'],
+  P: ['a', 'POOP', 'Y', 'smell'],
+  Q: ['GOD', 'SAVE', 'the', 'QUEEN'],
+  R: ['ro', 'TAT', 'ion'],
+  S: ['si', 'si', 'si'],
+  T: ['TALL'],
+  U: ['u', 'ni', 'FORM'],
+  V: ['vic', 'tor', 'y', 'VEE'],
+  W: ['the', 'WORLD', 'WAR'],
+  X: ['X', 'marks', 'the', 'SPOT'],
+  Y: ["YOU'RE", 'a', 'COOL', 'DUDE'],
+  Z: ['ZINC', 'ZOO', 'kee', 'per'],
+}
+
 // Learn mode: every character, grouped by type, never locked.
 export const REFERENCE_GROUPS = GROUPS.map((group) => {
   const chars = group.stages.flatMap((stage) => stage.chars)

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MORSE, GROUPS, STAGES, REFERENCE_GROUPS } from '../data/morseCode.js'
+import { MORSE, MNEMONICS, GROUPS, STAGES, REFERENCE_GROUPS } from '../data/morseCode.js'
 import { shuffle, buildSequence, updateWeak, MAX_WEAK_SCORE } from '../lib/rounds.js'
 import { timing, clampWpm, WPM_MIN, WPM_MAX, WPM_DEFAULT } from '../lib/timing.js'
 import { Check, Lock, Zap, Trash2, Eraser } from 'lucide-react'
@@ -123,6 +123,70 @@ function PatternBars({ pattern }) {
   )
 }
 
+// Learn mode viewer: the selected character as big dots and dashes with its memory phrase underneath.
+// While audio plays, activeIndex is the signal being sounded (-1 when idle) and the rest light up as they go.
+function PatternViewer({ char, activeIndex, onPlay }) {
+  const pattern = MORSE[char]
+  const phrase = MNEMONICS[char]
+  const symbols = [...pattern]
+  const hasPhrase = phrase && phrase.length === symbols.length
+  const playing = activeIndex >= 0
+
+  return (
+    <aside
+      aria-label={`${char} in Morse code`}
+      className="order-first lg:order-none self-start sticky top-3 lg:top-6 z-10 bg-panel border border-line rounded-xl p-4 lg:p-6 shadow-lg shadow-black/40 lg:shadow-none"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-baseline gap-3">
+          <span className="font-display text-4xl lg:text-5xl leading-none">{char}</span>
+          <span className="text-xs text-neutral-500">{hasPhrase ? 'Memory phrase' : 'Pattern'}</span>
+        </div>
+        <button
+          type="button"
+          onClick={onPlay}
+          aria-label={`Play ${char}`}
+          className="flex items-center gap-2 text-xs px-3 py-2 rounded-md border border-signal text-signal hover:bg-signal/10 transition-colors"
+        >
+          <Zap size={13} /> Play
+        </button>
+      </div>
+
+      <ol aria-label={`${char}: ${speak(pattern)}`} className="flex flex-wrap items-start gap-x-3 gap-y-4 mt-4 lg:mt-6">
+        {symbols.map((s, i) => {
+          const lit = !playing || i <= activeIndex
+          const current = playing && i === activeIndex
+          const label = hasPhrase ? phrase[i] : s === '.' ? 'dot' : 'dash'
+          return (
+            <li key={i} className="flex flex-col items-center gap-2 min-w-[2rem]">
+              <span
+                aria-hidden="true"
+                className={`block h-3 lg:h-4 rounded-sm transition-all duration-150 motion-reduce:transition-none ${
+                  s === '.' ? 'w-3 lg:w-4' : 'w-8 lg:w-12'
+                } ${lit ? 'bg-signal' : 'bg-signal/25'} ${current ? 'scale-110' : ''}`}
+              />
+              <span
+                className={`text-[11px] lg:text-xs leading-none transition-opacity motion-reduce:transition-none ${
+                  hasPhrase && s === '-' ? 'font-semibold text-neutral-100' : hasPhrase ? 'text-neutral-400' : 'text-neutral-500'
+                } ${lit ? '' : 'opacity-40'}`}
+              >
+                <span className="sr-only">{s === '.' ? 'dot: ' : 'dash: '}</span>
+                {label}
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+
+      {hasPhrase && (
+        <p className="hidden lg:block text-xs text-neutral-500 mt-5">
+          Say it out loud: CAPS syllables are dashes, quiet ones are dots.
+        </p>
+      )}
+    </aside>
+  )
+}
+
 function useBeep(speed) {
   const speedRef = useRef(speed)
   speedRef.current = speed
@@ -178,17 +242,21 @@ function useBeep(speed) {
   }
 
   // Starting a new pattern cancels the previous one, so double taps restart instead of overlapping.
-  const playPattern = async (pattern) => {
+  // onSymbol(i) fires as each signal starts. Resolves true if the pattern played to the end, false if it was cut off.
+  const playPattern = async (pattern, onSymbol) => {
     const token = ++playToken.current
     const { dot, dash, symbolGap } = speedRef.current
+    let i = 0
     for (const symbol of pattern) {
-      if (token !== playToken.current) return
+      if (token !== playToken.current) return false
+      onSymbol?.(i++)
       start()
       await sleep(symbol === '.' ? dot : dash)
-      if (token !== playToken.current) return
+      if (token !== playToken.current) return false
       stop()
       await sleep(symbolGap)
     }
+    return true
   }
 
   return { start, stop, playPattern, cancel }
@@ -215,6 +283,8 @@ export default function MorseTrainer() {
   const [testComplete, setTestComplete] = useState(false)
   const [weakCharacters, setWeakCharacters] = useState(loadWeak)
   const [learnCategory, setLearnCategory] = useState('All')
+  const [learnSelected, setLearnSelected] = useState('A')
+  const [learnActive, setLearnActive] = useState(-1)
   const [wpm, setWpm] = useState(loadWpm)
 
   // Mirrors weakCharacters so timeouts that fire after an answer still see the latest scores.
@@ -240,6 +310,9 @@ export default function MorseTrainer() {
     ? REFERENCE_GROUPS
     : REFERENCE_GROUPS.filter((group) => group.label === learnCategory)
   const visibleCharacterCount = visibleReferenceGroups.reduce((total, group) => total + group.chars.length, 0)
+  // If the selected character is filtered out, the viewer falls back to the first visible one.
+  const visibleChars = visibleReferenceGroups.flatMap((group) => group.chars)
+  const learnChar = visibleChars.includes(learnSelected) ? learnSelected : visibleChars[0]
 
   useEffect(() => saveJson(PROGRESS_KEY, completed), [completed])
   useEffect(() => saveJson(PRACTICE_PROGRESS_KEY, completedPractice), [completedPractice])
@@ -434,9 +507,17 @@ export default function MorseTrainer() {
     submitTestAnswer(letter)
   }
 
+  // Selects a character in Learn mode, plays it, and lights up each signal as it sounds.
+  const playLearn = async (c) => {
+    setLearnSelected(c)
+    const finished = await playPattern(MORSE[c], setLearnActive)
+    if (finished) setLearnActive(-1)
+  }
+
   const changeMode = (m) => {
     if (m === mode) return
     setMode(m)
+    setLearnActive(-1)
     if (m === 'test') startTest(lesson.chars)
     else resetRound(m === 'practice' ? practiceChars : lesson.chars)
   }
@@ -530,13 +611,14 @@ export default function MorseTrainer() {
         </span>
       </div>
 
-      <div className={`grid grid-cols-1 gap-5 ${mode === 'learn' ? '' : 'md:grid-cols-[1.3fr_1fr]'}`}>
+      <div className={`grid grid-cols-1 gap-5 ${mode === 'learn' ? 'lg:grid-cols-[1fr_320px]' : 'md:grid-cols-[1.3fr_1fr]'}`}>
         <div className="bg-panel border border-line rounded-xl p-8 flex flex-col items-center">
           {mode === 'learn' && (
             <>
               <div className="w-full mb-5">
                 <p className="text-sm text-neutral-500 mb-3">
-                  Explore the complete Morse alphabet. Select any character to hear its code.
+                  Select any character to hear it and see its dots and dashes. For letters, say the
+                  memory phrase out loud: CAPS syllables are dashes, quiet ones are dots.
                   Learn mode is always open; lesson progress does not restrict it.
                 </p>
                 <div className="flex flex-wrap gap-2" role="group" aria-label="Filter learning characters">
@@ -569,9 +651,14 @@ export default function MorseTrainer() {
                         <button
                           key={c}
                           type="button"
-                          onClick={() => playPattern(MORSE[c])}
+                          onClick={() => playLearn(c)}
                           aria-label={`${c}, ${speak(MORSE[c])}. Play sound`}
-                          className="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-line hover:border-signal hover:bg-signal/5 transition-colors"
+                          aria-pressed={learnChar === c}
+                          className={`flex items-center justify-between gap-3 px-3 py-2 rounded-md border transition-colors ${
+                            learnChar === c
+                              ? 'border-signal bg-signal/10'
+                              : 'border-line hover:border-signal hover:bg-signal/5'
+                          }`}
                         >
                           <span className="font-display text-lg">{c}</span>
                           <PatternBars pattern={MORSE[c]} />
@@ -741,6 +828,10 @@ export default function MorseTrainer() {
             </>
           )}
         </div>
+
+        {mode === 'learn' && (
+          <PatternViewer char={learnChar} activeIndex={learnActive} onPlay={() => playLearn(learnChar)} />
+        )}
 
         {mode === 'practice' ? (
           <div>
