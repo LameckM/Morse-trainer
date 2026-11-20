@@ -648,7 +648,6 @@ export default function MorseTrainer() {
                 <p className="text-xs text-neutral-500 mt-3">
                   {visibleCharacterCount} characters available
                 </p>
-                </div>
               </div>
               <div className="flex flex-col gap-6 w-full">
                 {visibleReferenceGroups.map((group) => (
