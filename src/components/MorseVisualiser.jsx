@@ -25,7 +25,7 @@ export default function MorseVisualiser() {
           <h2 className="text-sm font-semibold text-neutral-200">Choose a letter</h2>
           <p className="text-xs text-neutral-500">A–Z</p>
         </div>
-        <div className="grid grid-cols-6 sm:grid-cols-9 md:grid-cols-13 gap-2" role="group" aria-label="Choose a letter">
+        <div className="grid grid-cols-6 sm:grid-cols-9 md:grid-cols-[repeat(13,minmax(0,1fr))] gap-2" role="group" aria-label="Choose a letter">
           {LETTERS.map((letter) => (
             <button
               key={letter}
