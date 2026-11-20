@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MORSE, GROUPS, STAGES, REFERENCE_GROUPS } from '../data/morseCode.js'
+import { MORSE, MNEMONICS, GROUPS, STAGES, REFERENCE_GROUPS } from '../data/morseCode.js'
 import { shuffle, buildSequence, updateWeak, MAX_WEAK_SCORE } from '../lib/rounds.js'
 import { timing, clampWpm, WPM_MIN, WPM_MAX, WPM_DEFAULT } from '../lib/timing.js'
 import { Check, Lock, Zap, Trash2, Eraser } from 'lucide-react'
@@ -290,6 +290,8 @@ export default function MorseTrainer() {
   const [testComplete, setTestComplete] = useState(false)
   const [weakCharacters, setWeakCharacters] = useState(loadWeak)
   const [learnCategory, setLearnCategory] = useState('All')
+  const [learnSelected, setLearnSelected] = useState('A')
+  const [learnActive, setLearnActive] = useState(-1)
   const [wpm, setWpm] = useState(loadWpm)
 
   // Mirrors weakCharacters so timeouts that fire after an answer still see the latest scores.
@@ -646,58 +648,6 @@ export default function MorseTrainer() {
                 <p className="text-xs text-neutral-500 mt-3">
                   {visibleCharacterCount} characters available
                 </p>
-                <div className="mt-4 rounded-lg border border-line bg-ink/30 p-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowMnemonicGuide((open) => !open)}
-                    aria-expanded={showMnemonicGuide}
-                    aria-controls="letter-mnemonic-guide"
-                    className="w-full flex items-center justify-between gap-3 text-sm text-left"
-                  >
-                    <span>
-                      <span className="font-medium text-neutral-200">Visualise the dots & dashes</span>
-                      <span className="block text-xs text-neutral-500 mt-0.5">Use letter mnemonics to remember each Morse pattern</span>
-                    </span>
-                    <span className="text-signal text-xs whitespace-nowrap">{showMnemonicGuide ? 'Hide guide −' : 'Show guide +'}</span>
-                  </button>
-                  {showMnemonicGuide && (
-                    <div id="letter-mnemonic-guide" className="mt-3 pt-3 border-t border-line">
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <label htmlFor="mnemonic-letter" className="text-xs text-neutral-400">Choose a letter</label>
-                        <select
-                          id="mnemonic-letter"
-                          value={mnemonicLetter}
-                          onChange={(e) => setMnemonicLetter(e.target.value)}
-                          className="bg-panel border border-line rounded-md px-2 py-1.5 text-sm text-neutral-100"
-                        >
-                          {Object.keys(LETTER_MNEMONICS).map((letter) => (
-                            <option key={letter} value={letter}>{letter}</option>
-                          ))}
-                        </select>
-                        <span className="text-xs text-neutral-500">UPPERCASE = dash · lowercase = dot</span>
-                      </div>
-                      <div className="mt-3 rounded-md bg-panel border border-line p-3">
-                        <p className="text-xs text-neutral-500 mb-2">Say the mnemonic and follow its rhythm</p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {LETTER_MNEMONICS[mnemonicLetter].split(/\\s*-\\s*/).map((syllable, index) => {
-                            const isDash = syllable === syllable.toUpperCase()
-                            return (
-                              <div key={index} className="flex flex-col items-center gap-1 min-w-10">
-                                <span className="text-sm font-semibold text-neutral-200">{syllable}</span>
-                                <span
-                                  aria-label={isDash ? 'dash' : 'dot'}
-                                  className={`block rounded-sm bg-signal ${isDash ? 'w-6 h-2' : 'w-2 h-2 rounded-full'}`}
-                                />
-                              </div>
-                            )
-                          })}
-                        </div>
-                        <p className="text-xs text-neutral-400 mt-3">
-                          {mnemonicLetter} = <span className="font-mono text-signal tracking-widest">{MORSE[mnemonicLetter]}</span>
-                        </p>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
               <div className="flex flex-col gap-6 w-full">
